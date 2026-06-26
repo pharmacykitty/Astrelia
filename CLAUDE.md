@@ -17,6 +17,12 @@ Three pillars:
 
 Astrophysics and astrology coexist but are **separate modules** — different math, different data, different UI surfaces. We don't blend the science and the symbolism in code; the user chooses what they want to see.
 
+### Two viewing modes (same data engine, two cameras)
+1. **Sky mode** — you're standing on Earth. Raise the phone; real bodies are projected onto the celestial dome (RA/Dec → alt/az for your location and time). This is the AR "point at the sky" experience.
+2. **Galaxy Map mode** — you leave Earth and free-fly through a 3D star field, à la *Elite Dangerous*. Zoom from a stylized whole-galaxy view down to a single system; click to select and inspect.
+
+Both consume the same `CelestialCore` data — Sky mode uses horizontal coordinates; Map mode uses the stars' true 3D positions (RA/Dec + parallax distance → XYZ).
+
 ---
 
 ## Tech stack (proposed — confirm as we go)
@@ -52,9 +58,17 @@ Packages/
 - **Sensor fusion & smoothing:** magnetometer is noisy; needs filtering/calibration so the sky doesn't jitter. Account for magnetic vs. true north.
 - **Rendering performance & beauty:** culling, level-of-detail by magnitude, additive glow, all at 60fps.
 
+### Galaxy Map mode (the *Elite Dangerous*-style free-flight map)
+The trick is separating **real data** from **art**:
+- **Real (near field):** the ~119k catalogued stars from HYG have true 3D positions (parallax → XYZ in parsecs). Render them as glowing billboards in a free-fly 3D scene; click to select and inspect. Fly to a star and show its **actual known exoplanets**.
+- **Art (far field):** we will never have positions for 100B+ stars. Render the Milky Way's spiral arms as a stylized volumetric/particle backdrop, and overlay the real catalog where we have it. Zoom: stylized whole-galaxy → real local stars → single system.
+- **Not in scope:** Elite's literal procedural 400-billion-system simulation. We get the visual magic without it.
+- **Engineering caveats:** this is a *second* rendering pipeline (free-fly camera, Metal). Huge scale ranges demand floating-point precision care (camera-relative / scaled coordinate space, logarithmic depth). Needs a spatial index (octree/k-d tree) for picking and culling. Shares `CelestialCore` data; separate renderer.
+
 ## Data sources (verify licensing before bundling — this matters for App Store)
 - **Stars:** HYG Database v3 (~119k stars, combines Hipparcos/Yale/Gliese; public domain) is the likely starting catalog. Yale Bright Star Catalog for the brightest.
 - **Deep-sky:** Messier / NGC catalogs.
+- **Exoplanets:** NASA Exoplanet Archive (~5,700+ confirmed planets with host-star links) — powers "fly to a star, see its planets" in Galaxy Map mode.
 - **Planets/Sun/Moon:** VSOP87 / ELP analytical theories, or JPL data. Physical/astrophysical facts from NASA/JPL fact sheets.
 - **Candidate library:** `SwiftAA` (Swift port of Meeus' *Astronomical Algorithms*) — could save large effort on Time/Coordinates/Ephemeris. **Check license** and accuracy before depending on it.
 - **Astrology:** house systems (Placidus, Whole Sign, etc.), aspect math. Swiss Ephemeris is the gold standard but is **AGPL or paid-commercial** — incompatible with a closed App Store app unless licensed. Decide early; we may implement our own from `CelestialCore` ecliptic longitudes instead.
@@ -70,10 +84,11 @@ Packages/
 - **Phase 1:** `CelestialCore` Time + Coordinates, fully tested (equatorial→horizontal for a known star/time/place).
 - **Phase 2:** Ephemeris (Sun/Moon/planets) + star catalog ingestion & query API.
 - **Phase 3:** Sensor fusion — map device pointing to the celestial sphere; a debug crosshair that names what it's aimed at.
-- **Phase 4:** The rendered sky dome + AR "point at the sky" mode.
+- **Phase 4:** The rendered sky dome + AR "point at the sky" mode (Sky mode).
 - **Phase 5:** Tap-to-detail astrophysical data sheets.
 - **Phase 6:** Astrology module — zodiac overlay, natal charts, transits, aspects.
-- **Phase 7:** Beauty + performance pass (Metal), accessibility, iPad.
+- **Phase 7:** **Galaxy Map mode** — free-fly 3D star field (real near-field stars + stylized galaxy backdrop + exoplanets). Its own Metal renderer over the shared data engine.
+- **Phase 8:** Beauty + performance pass (Metal), accessibility, iPad.
 
 ## Open questions
 - Final name (+ App Store availability check).
