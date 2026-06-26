@@ -18,3 +18,10 @@ Astrolabe.xcodeproj/
 
 # Bundled star / celestial data (downloaded, not committed — see README)
 Data/
+
+# Web workspace (Node / Playwright)
+Web/node_modules/
+Web/test-results/
+Web/playwright-report/
+Web/blob-report/
+Web/.cache/

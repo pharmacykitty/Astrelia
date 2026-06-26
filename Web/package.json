@@ -1,0 +1,15 @@
+{
+  "name": "astrolabe-web",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Web workspace + Playwright headless tests for Astrolabe",
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.1"
+  }
+}
