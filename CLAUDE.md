@@ -38,14 +38,16 @@ Both consume the same `CelestialCore` data — Sky mode uses horizontal coordina
 Keep the math/data **platform-agnostic and unit-tested**, isolated from UI and sensors.
 
 ```
-Astrolabe/                 # Xcode app target (SwiftUI, sensors, rendering)
+App/                       # SwiftUI iOS app target (sensors, rendering)
+project.yml                # XcodeGen spec — the .xcodeproj is generated, not committed
 Packages/
   CelestialCore/           # local Swift package — NO UIKit/SwiftUI deps
-    Time/                  # Julian date, ΔT, sidereal time
-    Coordinates/           # equatorial ⇄ ecliptic ⇄ horizontal transforms
-    Ephemeris/             # Sun, Moon, planets (positions over time)
-    Catalog/               # star/DSO catalog model + queries
-  Astrology/               # separate package — houses, aspects, natal charts
+    Math/                  # ✅ Angle, Vector3
+    Time/                  # ✅ Julian date, sidereal time   (ΔT/nutation: TODO)
+    Coordinates/           # ✅ equatorial ⇄ horizontal       (ecliptic/precession: TODO)
+    Catalog/               # ✅ Star, HYG CSV ingestion, StarCatalog queries
+    Ephemeris/             # TODO — Sun, Moon, planets (positions over time)
+  Astrology/               # TODO — separate package: houses, aspects, natal charts
 ```
 
 - `CelestialCore` is pure computation: feed it a time + observer + body, get back coordinates and physical data. Fully testable against published reference values (Meeus worked examples, JPL Horizons).
@@ -82,7 +84,7 @@ The trick is separating **real data** from **art**:
 ## Roadmap
 - **Phase 0 — now:** vision + this doc + name. Decide on `SwiftAA` vs. roll-our-own.
 - **Phase 1 ✅:** `CelestialCore` Time + Coordinates — `Angle`, `JulianDay`, mean sidereal time, equatorial⇄horizontal transforms. Validated against Meeus worked examples (7.a, 12.a/b, 13.b). Conventions locked: azimuth from **North eastward**, longitude **east-positive**. (Decision: rolled our own; revisit SwiftAA at Phase 2 for ephemeris.) Still to add: nutation → apparent sidereal time; ecliptic coordinates; precession.
-- **Phase 2:** Ephemeris (Sun/Moon/planets) + star catalog ingestion & query API.
+- **Phase 2 (in progress):** Star catalog ingestion ✅ — `Star`, robust HYG CSV parser (column-mapped, quote-aware, validated on the full ~120k-row HYG v4.1), `StarCatalog` with name/Hipparcos lookups, magnitude filters, known-distance subset. Also done: iOS app target (XcodeGen) with a live `CelestialCore` proof-of-life screen. **Next:** ephemeris (Sun/Moon/planets) — the SwiftAA-vs-roll-our-own call lands here (VSOP87/ELP are heavy).
 - **Phase 3:** Sensor fusion — map device pointing to the celestial sphere; a debug crosshair that names what it's aimed at.
 - **Phase 4:** The rendered sky dome + AR "point at the sky" mode (Sky mode).
 - **Phase 5:** Tap-to-detail astrophysical data sheets.
