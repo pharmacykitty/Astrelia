@@ -3,5 +3,5 @@ import Testing
 
 @Test("engine reports its version")
 func engineHasVersion() {
-    #expect(CelestialCore.version == "0.0.1")
+    #expect(CelestialCoreInfo.version == "0.0.1")
 }

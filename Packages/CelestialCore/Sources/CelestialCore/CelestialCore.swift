@@ -4,9 +4,9 @@
 /// Everything here is `Sendable` so it stays safe under Swift 6 strict concurrency,
 /// and fully testable against published reference values (Meeus, JPL Horizons).
 ///
-/// Phase 1 will fill this out: `Time` (Julian date, ΔT, sidereal time) and
-/// `Coordinates` (equatorial ⇄ ecliptic ⇄ horizontal transforms).
-public enum CelestialCore {
+/// (Named `…Info` rather than `CelestialCore` so it doesn't collide with the
+/// module name — `CelestialCore.Angle` should always mean the module's type.)
+public enum CelestialCoreInfo {
     /// Semantic version of the engine.
     public static let version = "0.0.1"
 }
