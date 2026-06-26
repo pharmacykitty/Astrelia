@@ -81,7 +81,7 @@ The trick is separating **real data** from **art**:
 
 ## Roadmap
 - **Phase 0 — now:** vision + this doc + name. Decide on `SwiftAA` vs. roll-our-own.
-- **Phase 1:** `CelestialCore` Time + Coordinates, fully tested (equatorial→horizontal for a known star/time/place).
+- **Phase 1 ✅:** `CelestialCore` Time + Coordinates — `Angle`, `JulianDay`, mean sidereal time, equatorial⇄horizontal transforms. Validated against Meeus worked examples (7.a, 12.a/b, 13.b). Conventions locked: azimuth from **North eastward**, longitude **east-positive**. (Decision: rolled our own; revisit SwiftAA at Phase 2 for ephemeris.) Still to add: nutation → apparent sidereal time; ecliptic coordinates; precession.
 - **Phase 2:** Ephemeris (Sun/Moon/planets) + star catalog ingestion & query API.
 - **Phase 3:** Sensor fusion — map device pointing to the celestial sphere; a debug crosshair that names what it's aimed at.
 - **Phase 4:** The rendered sky dome + AR "point at the sky" mode (Sky mode).
