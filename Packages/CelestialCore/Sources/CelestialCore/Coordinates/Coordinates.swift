@@ -27,6 +27,19 @@ public struct EquatorialCoordinates: Sendable, Hashable {
     }
 }
 
+/// Ecliptic coordinates: longitude (λ) and latitude (β), measured along the plane
+/// of Earth's orbit. The natural frame for Sun/Moon/planet positions (and the
+/// zodiac, later).
+public struct EclipticCoordinates: Sendable, Hashable {
+    public var longitude: Angle
+    public var latitude: Angle
+
+    public init(longitude: Angle, latitude: Angle) {
+        self.longitude = longitude
+        self.latitude = latitude
+    }
+}
+
 /// Horizontal (alt-az) coordinates, relative to the observer's local horizon.
 ///
 /// Azimuth is measured **from North, increasing toward East** (N=0°, E=90°,

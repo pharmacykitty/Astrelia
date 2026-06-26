@@ -46,7 +46,7 @@ Packages/
     Time/                  # ✅ Julian date, sidereal time   (ΔT/nutation: TODO)
     Coordinates/           # ✅ equatorial ⇄ horizontal       (ecliptic/precession: TODO)
     Catalog/               # ✅ Star, HYG CSV ingestion, StarCatalog queries
-    Ephemeris/             # TODO — Sun, Moon, planets (positions over time)
+    Ephemeris/             # ✅ Sun & Moon (Meeus 25 / 47)   ·   planets: TODO
   Astrology/               # TODO — separate package: houses, aspects, natal charts
 ```
 
@@ -84,7 +84,7 @@ The trick is separating **real data** from **art**:
 ## Roadmap
 - **Phase 0 — now:** vision + this doc + name. Decide on `SwiftAA` vs. roll-our-own.
 - **Phase 1 ✅:** `CelestialCore` Time + Coordinates — `Angle`, `JulianDay`, mean sidereal time, equatorial⇄horizontal transforms. Validated against Meeus worked examples (7.a, 12.a/b, 13.b). Conventions locked: azimuth from **North eastward**, longitude **east-positive**. (Decision: rolled our own; revisit SwiftAA at Phase 2 for ephemeris.) Still to add: nutation → apparent sidereal time; ecliptic coordinates; precession.
-- **Phase 2 (in progress):** Star catalog ingestion ✅ — `Star`, robust HYG CSV parser (column-mapped, quote-aware, validated on the full ~120k-row HYG v4.1), `StarCatalog` with name/Hipparcos lookups, magnitude filters, known-distance subset. Also done: iOS app target (XcodeGen) with a live `CelestialCore` proof-of-life screen. **Next:** ephemeris (Sun/Moon/planets) — the SwiftAA-vs-roll-our-own call lands here (VSOP87/ELP are heavy).
+- **Phase 2 (in progress):** Star catalog ingestion ✅ (HYG parser + `StarCatalog`, validated on full ~120k-row HYG v4.1). Sun & Moon ephemeris ✅ — rolled our own: Sun (Meeus 25, apparent ~0.01°), Moon (Meeus 47, full 60+60-term ELP series, validated to Meeus 47.a), obliquity, ecliptic→equatorial transform, Moon phase/illumination. iOS app shows live Sun/Moon/Sirius alt-az + Moon phase. **Decision recorded: kept rolling our own — SwiftAA not needed so far.** Still TODO: nutation → apparent sidereal/obliquity (currently mean equinox, sub-arcmin); ΔT (UT↔TD); **planets (VSOP87)** — reassess SwiftAA there.
 - **Phase 3:** Sensor fusion — map device pointing to the celestial sphere; a debug crosshair that names what it's aimed at.
 - **Phase 4:** The rendered sky dome + AR "point at the sky" mode (Sky mode).
 - **Phase 5:** Tap-to-detail astrophysical data sheets.

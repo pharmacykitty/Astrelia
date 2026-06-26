@@ -73,4 +73,24 @@ public enum CoordinateTransform {
 
         return (declination, hourAngle)
     }
+
+    /// Ecliptic → equatorial, given the obliquity of the ecliptic (Meeus eq. 13.3/13.4).
+    public static func equatorial(
+        fromEcliptic ecliptic: EclipticCoordinates,
+        obliquity: Angle
+    ) -> EquatorialCoordinates {
+        let lambda = ecliptic.longitude
+        let beta = ecliptic.latitude
+        let epsilon = obliquity
+
+        let rightAscension = Angle.atan2(
+            y: lambda.sine * epsilon.cosine - beta.tangent * epsilon.sine,
+            x: lambda.cosine
+        ).normalized
+        let declination = Angle.asin(
+            beta.sine * epsilon.cosine + beta.cosine * epsilon.sine * lambda.sine
+        )
+
+        return EquatorialCoordinates(rightAscension: rightAscension, declination: declination)
+    }
 }
