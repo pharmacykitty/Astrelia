@@ -6,18 +6,18 @@ import CelestialCore
 /// The camera (device) axes expressed in the world reference frame
 /// (X = true north, Y = west, Z = up — the `.xTrueNorthZVertical` frame).
 ///
-/// CoreMotion's rotation matrix maps device-frame vectors into the reference frame,
-/// so the device axes are the *columns* of that matrix. The back camera — what you
-/// aim at the sky — looks along −Z of the device.
+/// CoreMotion's rotation matrix maps reference-frame vectors into the device frame
+/// (verified on-device), so the device axes are the *rows* of that matrix. The back
+/// camera — what you aim at the sky — looks along −Z of the device.
 struct CameraBasis {
     let right: SIMD3<Double>     // screen → right
     let up: SIMD3<Double>        // screen → top
     let forward: SIMD3<Double>   // back camera look direction
 
     init(_ m: CMRotationMatrix) {
-        right = SIMD3(m.m11, m.m21, m.m31)
-        up = SIMD3(m.m12, m.m22, m.m32)
-        forward = SIMD3(-m.m13, -m.m23, -m.m33)
+        right = SIMD3(m.m11, m.m12, m.m13)
+        up = SIMD3(m.m21, m.m22, m.m23)
+        forward = SIMD3(-m.m31, -m.m32, -m.m33)
     }
 
     /// Where the back camera is currently aimed, in horizontal coordinates.
