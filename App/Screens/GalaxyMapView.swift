@@ -59,10 +59,11 @@ struct GalaxyMapView: View {
         for point in backdrop {
             guard let (p, depth) = project(point.position, viewProjection, size) else { continue }
             if p.x < -2 || p.x > size.width + 2 || p.y < -2 || p.y > size.height + 2 { continue }
-            let fade = min(1.0, max(0.12, Double(2500 / depth)))
+            let perspective = min(3.0, max(0.7, Double(900 / depth)))
+            let radius = point.size * CGFloat(perspective)
             context.fill(
-                Path(ellipseIn: CGRect(x: p.x - point.size, y: p.y - point.size, width: point.size * 2, height: point.size * 2)),
-                with: .color(point.color.opacity(point.baseOpacity * fade))
+                Path(ellipseIn: CGRect(x: p.x - radius, y: p.y - radius, width: radius * 2, height: radius * 2)),
+                with: .color(point.color.opacity(point.baseOpacity))
             )
         }
 
@@ -89,6 +90,19 @@ struct GalaxyMapView: View {
                          at: CGPoint(x: sunPoint.x, y: sunPoint.y + 14))
         }
 
+        // Sagittarius A* — the galactic centre.
+        if let (p, depth) = project(Galactic.centerPosition, viewProjection, size), depth > 0 {
+            let glow = Color(red: 1.0, green: 0.9, blue: 0.72)
+            context.fill(Path(ellipseIn: CGRect(x: p.x - 18, y: p.y - 18, width: 36, height: 36)),
+                         with: .color(glow.opacity(0.10)))
+            context.fill(Path(ellipseIn: CGRect(x: p.x - 9, y: p.y - 9, width: 18, height: 18)),
+                         with: .color(glow.opacity(0.22)))
+            context.fill(Path(ellipseIn: CGRect(x: p.x - 3, y: p.y - 3, width: 6, height: 6)),
+                         with: .color(.white))
+            context.draw(Text("Sgr A*").font(.system(size: 10, weight: .semibold)).foregroundStyle(glow),
+                         at: CGPoint(x: p.x, y: p.y + 16))
+        }
+
         // Selection ring + label.
         if let selection, let (point, _) = project(selection.position, viewProjection, size) {
             context.stroke(Path(ellipseIn: CGRect(x: point.x - 12, y: point.y - 12, width: 24, height: 24)),
@@ -98,14 +112,16 @@ struct GalaxyMapView: View {
 
     private func overlay(size: CGSize, viewProjection: simd_float4x4) -> some View {
         VStack {
-            HStack {
+            HStack(spacing: 8) {
                 Text("\(stars.count) stars")
                     .font(.caption.monospacedDigit()).foregroundStyle(.white.opacity(0.6))
                 Spacer()
-                Button {
-                    animateCamera(to: .zero, distance: 220)
-                } label: {
-                    Label("Recenter", systemImage: "scope").font(.caption)
+                Button { animateCamera(to: .zero, distance: 220) } label: {
+                    Label("Sol", systemImage: "sun.max.fill").font(.caption)
+                }
+                .buttonStyle(.bordered).tint(.white)
+                Button { flyToGalaxy() } label: {
+                    Label("Galaxy", systemImage: "hurricane").font(.caption)
                 }
                 .buttonStyle(.bordered).tint(.white)
             }
@@ -175,13 +191,29 @@ struct GalaxyMapView: View {
         animateCamera(to: star.position, distance: 40)
     }
 
-    /// Smoothly flies the camera to a new target/distance over `duration` seconds
-    /// (eased straight-line path) instead of teleporting. Driving `target`/`distance`
-    /// per frame from a Task re-renders the Canvas without a persistent TimelineView.
-    private func animateCamera(to newTarget: SIMD3<Float>, distance newDistance: Float, duration: Double = 1.2) {
+    /// Flies the camera out to a face-on view of the whole galaxy, centred on Sgr A*.
+    private func flyToGalaxy() {
+        let n = Galactic.north
+        animateCamera(to: Galactic.centerPosition, distance: 42000,
+                      yaw: atan2(n.x, n.z), pitch: asin(max(-1, min(1, n.y))), duration: 1.9)
+    }
+
+    /// Smoothly flies the camera to a new target/distance (and optional orientation)
+    /// over `duration` seconds along an eased path, instead of teleporting. Driving
+    /// the camera state per frame from a Task re-renders the Canvas without a
+    /// persistent TimelineView.
+    private func animateCamera(to newTarget: SIMD3<Float>, distance newDistance: Float,
+                               yaw newYaw: Float? = nil, pitch newPitch: Float? = nil,
+                               duration: Double = 1.2) {
         flightTask?.cancel()
         let startTarget = target
         let startDistance = distance
+        let startYaw = yaw
+        let startPitch = pitch
+        let endPitch = newPitch ?? pitch
+        var deltaYaw = (newYaw ?? yaw) - startYaw
+        while deltaYaw > .pi { deltaYaw -= 2 * .pi }      // take the short way around
+        while deltaYaw < -.pi { deltaYaw += 2 * .pi }
         flightTask = Task { @MainActor in
             let start = Date()
             while !Task.isCancelled {
@@ -189,6 +221,8 @@ struct GalaxyMapView: View {
                 let eased = raw * raw * (3 - 2 * raw)   // smoothstep
                 target = startTarget + (newTarget - startTarget) * eased
                 distance = startDistance + (newDistance - startDistance) * eased
+                yaw = startYaw + deltaYaw * eased
+                pitch = startPitch + (endPitch - startPitch) * eased
                 zoomAnchor = distance
                 if raw >= 1 { break }
                 try? await Task.sleep(for: .milliseconds(16))
@@ -215,7 +249,7 @@ struct GalaxyMapView: View {
         MagnificationGesture()
             .onChanged { value in
                 flightTask?.cancel()
-                distance = min(8000, max(2, zoomAnchor / Float(value)))
+                distance = min(60000, max(2, zoomAnchor / Float(value)))
             }
             .onEnded { _ in zoomAnchor = distance }
     }
@@ -259,10 +293,11 @@ struct GalaxyMapView: View {
         stars = result
     }
 
-    /// Builds the stylized Milky Way: a faint flattened disc of points in the real
-    /// galactic plane (so the band sits where it actually is relative to the stars)
-    /// plus a warmer bulge toward the galactic centre. Pure art, not catalogued —
-    /// the real near-field stars render in front of it.
+    /// Builds the stylized Milky Way at true scale: a full four-arm spiral disc
+    /// centred on the galactic centre (~8.2 kpc from the Sun), so our real
+    /// near-field stars form just a small local sector near the rim. Spiral arms,
+    /// a diffuse inter-arm disc, and a bright central bulge. Pure art, not
+    /// catalogued — the real stars render in front of it.
     private func buildBackdrop() {
         guard backdrop.isEmpty else { return }
         var rng = SeededGenerator(seed: 99)
@@ -272,42 +307,67 @@ struct GalaxyMapView: View {
             let u2 = Double.random(in: 0...1, using: &rng)
             return Float((-2 * log(u1)).squareRoot() * cos(2 * Double.pi * u2))
         }
-        func unit(_ raDeg: Double, _ decDeg: Double) -> SIMD3<Float> {
-            let ra = Float(raDeg * .pi / 180), dec = Float(decDeg * .pi / 180)
-            return SIMD3(cos(dec) * cos(ra), cos(dec) * sin(ra), sin(dec))
+
+        let axisA = Galactic.center        // in-plane basis vectors at the centre
+        let axisB = Galactic.inPlane
+        let up = Galactic.north
+        let centre = Galactic.centerPosition
+        func place(_ x: Float, _ y: Float, _ h: Float) -> SIMD3<Float> {
+            centre + x * axisA + y * axisB + h * up
         }
-        // Galactic frame in equatorial coordinates.
-        let gNorth = unit(192.859, 27.128)      // galactic north pole
-        let gCenter = unit(266.405, -28.936)    // direction of the galactic centre (b = 0)
-        let gV = simd_normalize(simd_cross(gNorth, gCenter))
-        let cream = Color(red: 0.95, green: 0.93, blue: 0.86)
-        let gold = Color(red: 1.0, green: 0.86, blue: 0.62)
+
+        let armColor = Color(red: 0.80, green: 0.87, blue: 1.0)   // bluish young arm stars
+        let discColor = Color(red: 0.93, green: 0.91, blue: 0.85) // diffuse disc
+        let bulgeColor = Color(red: 1.0, green: 0.84, blue: 0.55) // warm central bulge
+
+        let rMax: Float = 16000
+        let arms = 4
+        let pitch: Float = 0.23   // logarithmic-spiral tightness
 
         var points: [BackdropPoint] = []
-        // The disc — denser/brighter toward the galactic centre to suggest the band.
+
+        // Spiral arms — bright, define the structure.
+        for armIndex in 0..<arms {
+            let offset = Float(armIndex) * (2 * .pi / Float(arms))
+            for _ in 0..<1700 {
+                let theta = rand(0, 1) * 6.0
+                let r = 600 * exp(pitch * theta)
+                if r > rMax { continue }
+                let rr = r + gaussian() * (r * 0.10 + 250)
+                let angle = theta + offset + gaussian() * 0.10
+                let h = gaussian() * (180 + r * 0.012)
+                points.append(BackdropPoint(
+                    position: place(cos(angle) * rr, sin(angle) * rr, h),
+                    baseOpacity: Double(rand(0.30, 0.65)),
+                    size: CGFloat(rand(0.7, 1.7)),
+                    color: armColor))
+            }
+        }
+
+        // Diffuse disc filling between the arms.
+        for _ in 0..<3600 {
+            let r = sqrt(rand(0, 1)) * rMax
+            let angle = rand(0, 2 * .pi)
+            let h = gaussian() * (160 + r * 0.012)
+            points.append(BackdropPoint(
+                position: place(cos(angle) * r, sin(angle) * r, h),
+                baseOpacity: Double(rand(0.05, 0.18)),
+                size: CGFloat(rand(0.5, 1.1)),
+                color: discColor))
+        }
+
+        // Central bulge — dense, warm, brightest; a flattened spheroid.
         for _ in 0..<2800 {
-            let theta = rand(0, 2 * .pi)
-            let r = sqrt(rand(0, 1)) * 6000 + 250
-            let h = gaussian() * 130
-            let planeDir = cos(theta) * gCenter + sin(theta) * gV
-            let pos = r * planeDir + h * gNorth
-            let centerward = 0.5 + 0.5 * simd_dot(planeDir, gCenter)
+            let x = gaussian() * 1700, y = gaussian() * 1700, z = gaussian() * 850
+            let dist = (x * x + y * y + z * z).squareRoot()
+            let opacity = min(0.85, max(0.15, 0.85 - Double(dist) / 3200))
             points.append(BackdropPoint(
-                position: pos,
-                baseOpacity: Double(0.05 + 0.20 * centerward) * Double(rand(0.4, 1)),
-                size: CGFloat(rand(0.5, 1.5)),
-                color: cream))
+                position: place(x, y, z),
+                baseOpacity: opacity * Double(rand(0.6, 1)),
+                size: CGFloat(rand(0.7, 1.8)),
+                color: bulgeColor))
         }
-        // The central bulge, far away toward the galactic centre.
-        for _ in 0..<900 {
-            let dir = simd_normalize(gCenter + SIMD3(gaussian(), gaussian(), gaussian()) * 0.18)
-            let pos = dir * (7000 + gaussian() * 1400)
-            points.append(BackdropPoint(
-                position: pos,
-                baseOpacity: Double(rand(0.08, 0.30)),
-                size: CGFloat(rand(0.6, 1.7)),
-                color: gold))
-        }
+
         backdrop = points
     }
 
@@ -341,6 +401,21 @@ private struct BackdropPoint {
     let baseOpacity: Double
     let size: CGFloat
     let color: Color
+}
+
+// MARK: - Galactic frame (equatorial coordinates, parsecs, Sun at origin)
+
+private func equatorialUnit(_ raDeg: Double, _ decDeg: Double) -> SIMD3<Float> {
+    let ra = Float(raDeg * .pi / 180), dec = Float(decDeg * .pi / 180)
+    return SIMD3(cos(dec) * cos(ra), cos(dec) * sin(ra), sin(dec))
+}
+
+private enum Galactic {
+    static let sunDistance: Float = 8178                       // pc, Sun → galactic centre
+    static let north = equatorialUnit(192.859, 27.128)         // galactic north pole
+    static let center = equatorialUnit(266.405, -28.936)       // toward the galactic centre (b = 0)
+    static let inPlane = simd_normalize(simd_cross(north, center))
+    static var centerPosition: SIMD3<Float> { center * sunDistance }
 }
 
 // MARK: - 3D matrix helpers
