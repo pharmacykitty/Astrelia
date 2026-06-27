@@ -1,58 +1,167 @@
 import SwiftUI
 
-/// The navigation hub, presented from the sky view's menu button. Keeps the sky
-/// itself uncluttered (no persistent tab bar) while giving the not-yet-built
-/// screens a home. Populate these placeholders later.
+/// The navigation hub, presented full-screen from the sky view's menu button.
+/// Full-screen (not a sheet) so pushed destinations like the Galaxy Map are
+/// edge-to-edge immersive with no card gap revealing the sky behind.
 struct MoreMenuView: View {
     let store: StarCatalogStore
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
-            List {
-                Section("Explore") {
-                    destination(.catalog)
-                    destination(.galaxyMap)
-                }
-                Section("Interpret") {
-                    destination(.astrology)
-                }
-                Section {
-                    destination(.about)
+            ZStack {
+                MenuBackground()
+                ScrollView {
+                    VStack(spacing: 30) {
+                        header
+                        section("Explore", [.catalog, .galaxyMap])
+                        section("Interpret", [.astrology])
+                        section(nil, [.about])
+                    }
+                    .padding(20)
+                    .padding(.bottom, 40)
                 }
             }
-            .navigationTitle("Astrolabe")
+            .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark")
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(.white.opacity(0.85))
+                            .frame(width: 30, height: 30)
+                            .background(.ultraThinMaterial, in: Circle())
+                    }
                 }
             }
         }
         .preferredColorScheme(.dark)
     }
 
-    private func destination(_ screen: AppScreen) -> some View {
-        NavigationLink {
-            switch screen {
-            case .galaxyMap: GalaxyMapView(store: store)
-            default: PlaceholderScreen(screen: screen)
+    private var header: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "sparkles")
+                .font(.system(size: 26))
+                .foregroundStyle(LinearGradient(colors: [.white, .purple.opacity(0.8)],
+                                                startPoint: .top, endPoint: .bottom))
+            Text("Astrolabe")
+                .font(.system(size: 40, weight: .bold, design: .serif))
+                .foregroundStyle(LinearGradient(colors: [.white, .white.opacity(0.65)],
+                                                startPoint: .top, endPoint: .bottom))
+            Text("Chart the heavens")
+                .font(.subheadline)
+                .foregroundStyle(.white.opacity(0.5))
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 8)
+    }
+
+    private func section(_ title: String?, _ screens: [AppScreen]) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if let title {
+                Text(title.uppercased())
+                    .font(.caption.weight(.semibold))
+                    .tracking(1.8)
+                    .foregroundStyle(.white.opacity(0.4))
+                    .padding(.leading, 6)
             }
-        } label: {
-            Label {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(screen.title)
-                    Text(screen.subtitle).font(.caption).foregroundStyle(.secondary)
+            ForEach(screens, id: \.self) { screen in
+                NavigationLink {
+                    destination(screen)
+                } label: {
+                    DestinationCard(screen: screen)
                 }
-            } icon: {
-                Image(systemName: screen.symbol).foregroundStyle(screen.tint)
+                .buttonStyle(.plain)
             }
+        }
+    }
+
+    @ViewBuilder
+    private func destination(_ screen: AppScreen) -> some View {
+        switch screen {
+        case .galaxyMap: GalaxyMapView(store: store)
+        default: PlaceholderScreen(screen: screen)
         }
     }
 }
 
+/// A tappable card for one destination — tinted icon badge, title, subtitle.
+private struct DestinationCard: View {
+    let screen: AppScreen
+
+    var body: some View {
+        HStack(spacing: 16) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(LinearGradient(colors: screen.gradient, startPoint: .topLeading, endPoint: .bottomTrailing))
+                Image(systemName: screen.symbol)
+                    .font(.system(size: 22, weight: .medium))
+                    .foregroundStyle(.white)
+            }
+            .frame(width: 52, height: 52)
+            .shadow(color: screen.gradient.first?.opacity(0.5) ?? .clear, radius: 8, y: 3)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(screen.title)
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                Text(screen.subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.55))
+            }
+
+            Spacer()
+
+            Image(systemName: "chevron.right")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.3))
+        }
+        .padding(16)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(.white.opacity(0.08), lineWidth: 0.5)
+        )
+    }
+}
+
+/// Deep-space gradient with a faint static starfield, shared by the menu.
+private struct MenuBackground: View {
+    var body: some View {
+        ZStack {
+            LinearGradient(colors: [Color(red: 0.05, green: 0.04, blue: 0.12),
+                                    Color(red: 0.02, green: 0.02, blue: 0.06)],
+                           startPoint: .top, endPoint: .bottom)
+            Canvas { context, size in
+                var rng = SeededGenerator(seed: 7)
+                for _ in 0..<140 {
+                    let x = Double.random(in: 0...size.width, using: &rng)
+                    let y = Double.random(in: 0...size.height, using: &rng)
+                    let r = Double.random(in: 0.3...1.4, using: &rng)
+                    let opacity = Double.random(in: 0.05...0.5, using: &rng)
+                    context.fill(Path(ellipseIn: CGRect(x: x, y: y, width: r * 2, height: r * 2)),
+                                 with: .color(.white.opacity(opacity)))
+                }
+            }
+        }
+        .ignoresSafeArea()
+    }
+}
+
+/// A tiny deterministic LCG so the decorative starfield is stable across redraws.
+struct SeededGenerator: RandomNumberGenerator {
+    private var state: UInt64
+    init(seed: UInt64) { state = seed }
+    mutating func next() -> UInt64 {
+        state = state &* 6364136223846793005 &+ 1442695040888963407
+        return state
+    }
+}
+
 /// The future top-level screens. Real content arrives later.
-enum AppScreen: CaseIterable {
+enum AppScreen: Hashable, CaseIterable {
     case catalog, galaxyMap, astrology, about
 
     var title: String {
@@ -76,9 +185,9 @@ enum AppScreen: CaseIterable {
     var symbol: String {
         switch self {
         case .catalog: "magnifyingglass"
-        case .galaxyMap: "globe.americas"
-        case .astrology: "moon.stars"
-        case .about: "info.circle"
+        case .galaxyMap: "globe.americas.fill"
+        case .astrology: "moon.stars.fill"
+        case .about: "info.circle.fill"
         }
     }
 
@@ -88,6 +197,15 @@ enum AppScreen: CaseIterable {
         case .galaxyMap: .purple
         case .astrology: .yellow
         case .about: .gray
+        }
+    }
+
+    var gradient: [Color] {
+        switch self {
+        case .catalog: [Color(red: 0.2, green: 0.8, blue: 0.95), Color(red: 0.1, green: 0.45, blue: 0.9)]
+        case .galaxyMap: [Color(red: 0.6, green: 0.35, blue: 0.95), Color(red: 0.35, green: 0.2, blue: 0.7)]
+        case .astrology: [Color(red: 0.98, green: 0.8, blue: 0.35), Color(red: 0.95, green: 0.5, blue: 0.3)]
+        case .about: [Color(white: 0.55), Color(white: 0.32)]
         }
     }
 }
@@ -102,9 +220,15 @@ struct PlaceholderScreen: View {
                            startPoint: .top, endPoint: .bottom)
                 .ignoresSafeArea()
             VStack(spacing: 16) {
-                Image(systemName: screen.symbol)
-                    .font(.system(size: 52))
-                    .foregroundStyle(screen.tint)
+                ZStack {
+                    Circle()
+                        .fill(LinearGradient(colors: screen.gradient, startPoint: .topLeading, endPoint: .bottomTrailing))
+                        .frame(width: 96, height: 96)
+                        .shadow(color: screen.gradient.first?.opacity(0.6) ?? .clear, radius: 16)
+                    Image(systemName: screen.symbol)
+                        .font(.system(size: 42))
+                        .foregroundStyle(.white)
+                }
                 Text(screen.title)
                     .font(.system(.largeTitle, design: .serif).weight(.bold))
                     .foregroundStyle(.white)

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import ARKit
 import simd
 import CelestialCore
@@ -19,6 +20,7 @@ struct ContentView: View {
     @State private var showFilters = false
     @State private var showMenu = false
     @State private var uiRotation = 0.0   // chrome rotation (degrees) to stay upright as the phone tilts
+    @Environment(\.openURL) private var openURL
 
     @State private var mode: SkyMode = .virtual
     @State private var starField: [StarPoint] = []          // sorted brightest-first
@@ -73,6 +75,8 @@ struct ContentView: View {
                     .gesture(tapGesture(size: size))
                     .simultaneousGesture(zoomGesture)
 
+                skyStatusOverlay
+
                 chrome(size: size)
             }
         }
@@ -103,7 +107,7 @@ struct ContentView: View {
             FilterSheet(filters: $filters, catalog: store.catalog)
                 .presentationDetents([.medium, .large])
         }
-        .sheet(isPresented: $showMenu) {
+        .fullScreenCover(isPresented: $showMenu) {
             MoreMenuView(store: store)
         }
     }
@@ -208,12 +212,77 @@ struct ContentView: View {
         Circle().stroke(.white.opacity(0.3), lineWidth: 1).frame(width: 44, height: 44)
     }
 
+    /// Explains an empty sky instead of leaving it blank: the stars only render once
+    /// location + motion + catalog are all ready. A fresh sideload resets the
+    /// location permission, which otherwise silently empties the whole view.
+    private struct SkyStatus { let symbol: String; let message: String; let showSettings: Bool }
+
+    private var skyStatus: SkyStatus? {
+        if !provider.isAuthorized {
+            let denied = provider.authorization == .denied || provider.authorization == .restricted
+            return SkyStatus(
+                symbol: "location.slash",
+                message: denied ? "Astrolabe needs location access to place the sky.\nEnable it in Settings."
+                                : "Allow location access so Astrolabe can compute your sky.",
+                showSettings: denied)
+        }
+        if !provider.hasLocation {
+            return SkyStatus(symbol: "location.magnifyingglass", message: "Finding your location…", showSettings: false)
+        }
+        if store.catalog == nil {
+            return SkyStatus(symbol: "sparkles", message: "Loading star catalog…", showSettings: false)
+        }
+        if mode == .virtual && provider.rotationMatrix == nil {
+            return SkyStatus(symbol: "gyroscope", message: "Calibrating motion sensors…", showSettings: false)
+        }
+        if mode == .ar && arController.currentFrame == nil {
+            return SkyStatus(symbol: "camera.viewfinder", message: "Starting AR camera…", showSettings: false)
+        }
+        return nil
+    }
+
+    @ViewBuilder
+    private var skyStatusOverlay: some View {
+        if let status = skyStatus {
+            VStack(spacing: 14) {
+                Image(systemName: status.symbol)
+                    .font(.system(size: 38)).foregroundStyle(.white.opacity(0.85))
+                Text(status.message)
+                    .font(.callout).multilineTextAlignment(.center)
+                    .foregroundStyle(.white.opacity(0.85))
+                if status.showSettings {
+                    Button("Open Settings") {
+                        if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
+                    }
+                    .buttonStyle(.borderedProminent).tint(.white)
+                } else {
+                    ProgressView().tint(.white).padding(.top, 2)
+                }
+            }
+            .padding(28)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24))
+            .padding(40)
+        }
+    }
+
     private func circleButton(_ systemName: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: systemName)
                 .font(.title3).foregroundStyle(.white)
-                .padding(10).background(.white.opacity(0.16), in: Circle())
+                .frame(width: 44, height: 44)
+                .background(.ultraThinMaterial, in: Circle())
+                .overlay(Circle().strokeBorder(.white.opacity(0.15), lineWidth: 0.5))
         }
+    }
+
+    /// Top safe-area inset (Dynamic Island / notch). The sky is full-bleed, so the
+    /// chrome reads this directly to keep its controls clear of the island.
+    private var safeAreaTop: CGFloat {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .first(where: \.isKeyWindow)?
+            .safeAreaInsets.top ?? 0
     }
 
     private func chrome(size: CGSize) -> some View {
@@ -222,12 +291,14 @@ struct ContentView: View {
                 circleButton("square.grid.2x2") { showMenu = true }
                     .rotationEffect(.degrees(uiRotation))
 
+                Spacer()
+
                 Picker("Mode", selection: $mode) {
                     Text("Sky").tag(SkyMode.virtual)
                     Text("AR").tag(SkyMode.ar)
                 }
                 .pickerStyle(.segmented)
-                .frame(width: 120)
+                .frame(width: 132)
                 .rotationEffect(.degrees(uiRotation))
 
                 Spacer()
@@ -235,7 +306,6 @@ struct ContentView: View {
                 circleButton("slider.horizontal.3") { showFilters = true }
                     .rotationEffect(.degrees(uiRotation))
             }
-            .padding(.top, 8)
 
             if let selection { selectionCard(selection) }
             if mode == .ar { calibrationBar() }
@@ -247,7 +317,9 @@ struct ContentView: View {
                 bottomPanel(camera.flatMap { solarState(camera: $0, size: size, date: Date()) })
             }
         }
-        .padding()
+        .padding(.horizontal)
+        .padding(.top, max(safeAreaTop, 12))
+        .padding(.bottom)
     }
 
     private func selectionCard(_ selection: StarSelection) -> some View {
