@@ -4,6 +4,7 @@ import SwiftUI
 /// itself uncluttered (no persistent tab bar) while giving the not-yet-built
 /// screens a home. Populate these placeholders later.
 struct MoreMenuView: View {
+    let store: StarCatalogStore
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -33,7 +34,10 @@ struct MoreMenuView: View {
 
     private func destination(_ screen: AppScreen) -> some View {
         NavigationLink {
-            PlaceholderScreen(screen: screen)
+            switch screen {
+            case .galaxyMap: GalaxyMapView(store: store)
+            default: PlaceholderScreen(screen: screen)
+            }
         } label: {
             Label {
                 VStack(alignment: .leading, spacing: 2) {
@@ -119,5 +123,5 @@ struct PlaceholderScreen: View {
 }
 
 #Preview {
-    MoreMenuView()
+    MoreMenuView(store: StarCatalogStore())
 }

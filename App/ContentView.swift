@@ -104,7 +104,7 @@ struct ContentView: View {
                 .presentationDetents([.medium, .large])
         }
         .sheet(isPresented: $showMenu) {
-            MoreMenuView()
+            MoreMenuView(store: store)
         }
     }
 
