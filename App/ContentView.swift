@@ -1,21 +1,24 @@
 import SwiftUI
-import CoreMotion
+import ARKit
 import simd
 import CelestialCore
 
 // SwiftUI also declares `Angle`; in this file we always mean the astronomy one.
 private typealias Angle = CelestialCore.Angle
 
-/// The sky visualizer. Point the phone around for the real sky: the naked-eye star
-/// catalog drawn by brightness, constellation figures, and the Sun & Moon as nodes.
-/// Pinch to zoom (more star names reveal as you do), tap a star to identify it, and
-/// use the filter sheet to tune what's shown.
+private enum SkyMode: Hashable { case virtual, ar }
+
+/// The sky visualizer. "Sky" mode draws the sky on a dark background from the
+/// device attitude; "AR" mode overlays it on the live camera via ARKit, with a
+/// manual calibration nudge for precision. Both share one renderer (`SkyCamera`).
 struct ContentView: View {
     @State private var provider = SkyMotionProvider()
     @State private var store = StarCatalogStore()
+    @State private var arController = ARCameraController()
     @State private var filters = SkyFilters()
     @State private var showFilters = false
 
+    @State private var mode: SkyMode = .virtual
     @State private var starField: [StarPoint] = []          // sorted brightest-first
     @State private var constellationPaths: [ConstellationPath] = []
 
@@ -23,15 +26,26 @@ struct ContentView: View {
     @State private var zoomAnchor = 65.0
     @State private var selection: StarSelection?
 
+    // AR calibration (azimuth offset, degrees) that cancels compass error.
+    @State private var azimuthOffset = 0.0
+    @State private var calibrating = false
+    @State private var calibrationOptions: [CalibrationOption] = []
+    @State private var calibrationTarget = "Sun"
+
     var body: some View {
         GeometryReader { geometry in
             TimelineView(.animation) { timeline in
-                let rotation = provider.rotationMatrix
-                let state = rotation.flatMap { solarState(rotation: $0, size: geometry.size, date: timeline.date) }
+                let camera = makeSkyCamera(size: geometry.size)
+                let effectiveFOV = mode == .virtual ? fieldOfView : 55.0
+                let state = camera.flatMap { solarState(camera: $0, size: geometry.size, date: timeline.date) }
                 ZStack {
-                    background
-                    if let rotation {
-                        skyCanvas(rotation: rotation, size: geometry.size)
+                    if mode == .ar {
+                        ARCameraView(controller: arController).ignoresSafeArea()
+                    } else {
+                        background
+                    }
+                    if let camera {
+                        skyCanvas(camera: camera, effectiveFOV: effectiveFOV, size: geometry.size)
                     }
                     if let state, filters.showSunMoon {
                         bodyNodes(state)
@@ -39,6 +53,7 @@ struct ContentView: View {
                     reticle
                     chrome(state: state)
                 }
+                .contentShape(Rectangle())
                 .gesture(tapGesture(size: geometry.size))
                 .simultaneousGesture(zoomGesture)
             }
@@ -46,7 +61,10 @@ struct ContentView: View {
         .ignoresSafeArea()
         .statusBarHidden()
         .onAppear { provider.start(); store.loadIfNeeded() }
-        .onDisappear { provider.stop() }
+        .onDisappear { provider.stop(); arController.stop() }
+        .onChange(of: mode) { _, newMode in
+            if newMode == .ar { arController.start() } else { arController.stop() }
+        }
         .onChange(of: filters) { _, _ in refreshSky() }
         .task {
             while !Task.isCancelled {
@@ -62,19 +80,8 @@ struct ContentView: View {
 
     // MARK: Sky rendering (stars + constellations + labels, one Canvas)
 
-    private func skyCanvas(rotation: CMRotationMatrix, size: CGSize) -> some View {
-        let basis = CameraBasis(rotation)
-        let focal = Double(size.height) / 2 / tan(Angle.degrees(fieldOfView).radians / 2)
-        let centerX = Double(size.width) / 2, centerY = Double(size.height) / 2
-        let labelLimit = labelMagnitudeLimit(fieldOfView)
-
-        func project(_ direction: SIMD3<Double>, minForward: Double = 0.06) -> CGPoint? {
-            let forward = simd_dot(direction, basis.forward)
-            guard forward > minForward else { return nil }
-            return CGPoint(x: centerX + simd_dot(direction, basis.right) / forward * focal,
-                           y: centerY - simd_dot(direction, basis.up) / forward * focal)
-        }
-
+    private func skyCanvas(camera: SkyCamera, effectiveFOV: Double, size: CGSize) -> some View {
+        let labelLimit = labelMagnitudeLimit(effectiveFOV)
         return Canvas { context, _ in
             // Constellation lines.
             if filters.showConstellations {
@@ -84,7 +91,7 @@ struct ContentView: View {
                     for line in path.polylines {
                         var previous: CGPoint?
                         for vertex in line {
-                            if let point = project(vertex, minForward: 0.15) {
+                            if let point = camera.projectDirection(vertex), within(point, size, margin: 500) {
                                 if let previous { shape.move(to: previous); shape.addLine(to: point) }
                                 previous = point
                             } else {
@@ -98,8 +105,7 @@ struct ContentView: View {
 
             // Stars.
             for star in starField {
-                guard let point = project(star.direction) else { continue }
-                if point.x < -4 || point.x > size.width + 4 || point.y < -4 || point.y > size.height + 4 { continue }
+                guard let point = camera.projectDirection(star.direction), within(point, size, margin: 4) else { continue }
                 let radius = starRadius(star.magnitude)
                 if star.magnitude < 1.5 {
                     let g = radius * 3
@@ -110,43 +116,38 @@ struct ContentView: View {
                              with: .color(star.color))
             }
 
-            // Labels (constellation names first, then stars by brightness), de-cluttered.
+            // Labels (constellation names, then stars by brightness), de-cluttered.
             var occupied: [CGRect] = []
-            func place(_ text: Text, at point: CGPoint, below: Bool) {
+            func place(_ text: Text, at point: CGPoint) {
                 let resolved = context.resolve(text)
                 let measured = resolved.measure(in: CGSize(width: 200, height: 60))
-                let origin = CGPoint(x: point.x, y: point.y + (below ? 9 : 0))
-                let rect = CGRect(x: origin.x - measured.width / 2, y: origin.y - measured.height / 2,
+                let rect = CGRect(x: point.x - measured.width / 2, y: point.y - measured.height / 2,
                                   width: measured.width, height: measured.height)
-                guard rect.minX > 0, rect.maxX < size.width, rect.minY > 40, rect.maxY < size.height - 120 else { return }
+                guard rect.minX > 0, rect.maxX < size.width, rect.minY > 44, rect.maxY < size.height - 130 else { return }
                 if occupied.contains(where: { $0.intersects(rect) }) { return }
                 occupied.append(rect.insetBy(dx: -4, dy: -4))
-                context.draw(resolved, at: origin)
+                context.draw(resolved, at: point)
             }
 
             if filters.showConstellations {
                 for path in constellationPaths {
-                    if let point = project(path.labelDirection, minForward: 0.25) {
+                    if let point = camera.projectDirection(path.labelDirection), within(point, size, margin: 0) {
                         place(Text(path.id.uppercased())
                             .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(Color(red: 0.6, green: 0.72, blue: 1.0).opacity(0.55)),
-                              at: point, below: false)
+                            .foregroundStyle(Color(red: 0.6, green: 0.72, blue: 1.0).opacity(0.55)), at: point)
                     }
                 }
             }
             if filters.showLabels {
                 for star in starField where star.label != nil && star.magnitude <= labelLimit {
-                    guard let point = project(star.direction) else { continue }
+                    guard let point = camera.projectDirection(star.direction), within(point, size, margin: 0) else { continue }
                     place(Text(star.label ?? "")
                         .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.82)),
-                          at: point, below: true)
+                        .foregroundStyle(.white.opacity(0.82)), at: CGPoint(x: point.x, y: point.y + 9))
                 }
             }
         }
     }
-
-    // MARK: Sun & Moon nodes
 
     private func bodyNodes(_ state: SolarState) -> some View {
         ForEach(state.bodies) { body in
@@ -173,7 +174,7 @@ struct ContentView: View {
     }
 
     private var reticle: some View {
-        Circle().stroke(.white.opacity(0.22), lineWidth: 1).frame(width: 44, height: 44)
+        Circle().stroke(.white.opacity(0.3), lineWidth: 1).frame(width: 44, height: 44)
     }
 
     private func chrome(state: SolarState?) -> some View {
@@ -181,21 +182,26 @@ struct ContentView: View {
             ZStack {
                 Text("Astrolabe")
                     .font(.system(.title2, design: .serif).weight(.bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.white).shadow(radius: 3)
                 HStack {
+                    Picker("Mode", selection: $mode) {
+                        Text("Sky").tag(SkyMode.virtual)
+                        Text("AR").tag(SkyMode.ar)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 120)
                     Spacer()
                     Button { showFilters = true } label: {
                         Image(systemName: "slider.horizontal.3")
-                            .font(.title3)
-                            .foregroundStyle(.white)
-                            .padding(10)
-                            .background(.white.opacity(0.12), in: Circle())
+                            .font(.title3).foregroundStyle(.white)
+                            .padding(10).background(.white.opacity(0.16), in: Circle())
                     }
                 }
             }
             .padding(.top, 8)
 
             if let selection { selectionCard(selection) }
+            if mode == .ar { calibrationBar() }
 
             Spacer()
             bottomPanel(state)
@@ -219,6 +225,37 @@ struct ContentView: View {
     }
 
     @ViewBuilder
+    private func calibrationBar() -> some View {
+        if calibrating {
+            HStack(spacing: 10) {
+                Menu {
+                    ForEach(calibrationOptions) { option in
+                        Button(option.label) { calibrationTarget = option.id }
+                    }
+                } label: {
+                    Label(calibrationTargetLabel, systemImage: "scope").font(.subheadline)
+                }
+                Spacer()
+                Button("Align") { alignCalibration() }.buttonStyle(.borderedProminent)
+                Button("Cancel") { calibrating = false }.foregroundStyle(.white.opacity(0.7))
+            }
+            .padding(10).background(.ultraThinMaterial, in: Capsule())
+        } else {
+            HStack(spacing: 12) {
+                Button { startCalibration() } label: {
+                    Label("Calibrate", systemImage: "scope").font(.subheadline)
+                }
+                if azimuthOffset != 0 {
+                    Text(String(format: "aligned %+.0f°", azimuthOffset))
+                        .font(.caption).foregroundStyle(.green)
+                    Button("Reset") { azimuthOffset = 0 }.font(.caption).foregroundStyle(.white.opacity(0.7))
+                }
+            }
+            .padding(10).background(.ultraThinMaterial, in: Capsule())
+        }
+    }
+
+    @ViewBuilder
     private func bottomPanel(_ state: SolarState?) -> some View {
         VStack(spacing: 10) {
             if let state {
@@ -226,16 +263,13 @@ struct ContentView: View {
                     ForEach(state.bodies) { body in bodyRow(body) }
                     Divider().overlay(.white.opacity(0.2))
                 }
-                Text(String(format: "Pointing  %@ %.0f°  ·  alt %+.0f°  ·  %.0f° fov",
+                Text(String(format: "Pointing  %@ %.0f°  ·  alt %+.0f°",
                             compass(state.pointing.azimuth),
-                            state.pointing.azimuth.degrees,
-                            state.pointing.altitude.degrees, fieldOfView))
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.white.opacity(0.6))
+                            state.pointing.azimuth.degrees, state.pointing.altitude.degrees))
+                    .font(.caption.monospacedDigit()).foregroundStyle(.white.opacity(0.7))
             } else {
-                Text(statusMessage)
-                    .font(.callout).multilineTextAlignment(.center)
-                    .foregroundStyle(.white.opacity(0.8))
+                Text(statusMessage).font(.callout).multilineTextAlignment(.center)
+                    .foregroundStyle(.white.opacity(0.85))
             }
         }
         .padding(14)
@@ -261,26 +295,21 @@ struct ContentView: View {
 
     private var zoomGesture: some Gesture {
         MagnificationGesture()
-            .onChanged { value in fieldOfView = min(95, max(18, zoomAnchor / value)) }
+            .onChanged { value in if mode == .virtual { fieldOfView = min(95, max(18, zoomAnchor / value)) } }
             .onEnded { _ in zoomAnchor = fieldOfView }
     }
 
     private func tapGesture(size: CGSize) -> some Gesture {
-        SpatialTapGesture()
-            .onEnded { event in identify(at: event.location, size: size) }
+        SpatialTapGesture().onEnded { event in identify(at: event.location, size: size) }
     }
 
     private func identify(at location: CGPoint, size: CGSize) {
-        guard let rotation = provider.rotationMatrix, let catalog = store.catalog else { return }
-        let basis = CameraBasis(rotation)
+        guard let camera = makeSkyCamera(size: size), let catalog = store.catalog else { return }
         var best: (distance: CGFloat, id: Int)?
         for star in starField {
-            guard let point = projectToScreen(direction: star.direction, basis: basis,
-                                              viewSize: size, verticalFOV: .degrees(fieldOfView)) else { continue }
+            guard let point = camera.projectDirection(star.direction) else { continue }
             let distance = hypot(point.x - location.x, point.y - location.y)
-            if distance < 30, best == nil || distance < best!.distance {
-                best = (distance, star.id)
-            }
+            if distance < 30, best == nil || distance < best!.distance { best = (distance, star.id) }
         }
         if let best, let star = catalog.star(id: best.id) {
             selection = StarSelection(star: star)
@@ -289,14 +318,24 @@ struct ContentView: View {
         }
     }
 
-    // MARK: Building state
+    // MARK: Camera & state
 
-    private func solarState(rotation: CMRotationMatrix, size: CGSize, date: Date) -> SolarState? {
+    private func makeSkyCamera(size: CGSize) -> SkyCamera? {
+        switch mode {
+        case .virtual:
+            guard let rotation = provider.rotationMatrix else { return nil }
+            return .motion(rotation: rotation, fieldOfView: .degrees(fieldOfView), size: size)
+        case .ar:
+            guard let frame = arController.currentFrame else { return nil }
+            return .ar(camera: frame.camera, azimuthOffset: .degrees(azimuthOffset), size: size)
+        }
+    }
+
+    private func solarState(camera: SkyCamera, size: CGSize, date: Date) -> SolarState? {
         guard let latitude = provider.latitude, let longitude = provider.longitude else { return nil }
-        let basis = CameraBasis(rotation)
-        let pointing = basis.pointing
         let location = GeographicLocation(latitude: .degrees(latitude), longitude: .degrees(longitude))
         let jd = JulianDay(date)
+        let pointing = camera.pointing
 
         func make(_ name: String, _ color: Color, _ size2: CGFloat, _ glow: CGFloat,
                   _ equatorial: EquatorialCoordinates) -> ProjectedBody {
@@ -305,7 +344,7 @@ struct ContentView: View {
             return ProjectedBody(
                 id: name, name: name, color: color, size: size2, glow: glow,
                 azimuth: horizon.azimuth, altitude: horizon.altitude,
-                screen: projectToScreen(direction: direction, basis: basis, viewSize: size, verticalFOV: .degrees(fieldOfView)),
+                screen: camera.projectDirection(direction),
                 deltaAzimuth: signedDelta(horizon.azimuth.degrees - pointing.azimuth.degrees),
                 deltaAltitude: horizon.altitude.degrees - pointing.altitude.degrees
             )
@@ -333,7 +372,6 @@ struct ContentView: View {
             return worldDirection(azimuth: horizon.azimuth, altitude: horizon.altitude)
         }
 
-        // Stars
         if filters.showStars, let catalog = store.catalog {
             let limit = filters.magnitudeLimit
             let includeBelow = filters.showBelowHorizon
@@ -347,8 +385,7 @@ struct ContentView: View {
                     direction: worldDirection(azimuth: horizon.azimuth, altitude: horizon.altitude),
                     magnitude: star.apparentMagnitude,
                     color: starColor(star.colorIndex),
-                    label: star.properName ?? star.bayerFlamsteed
-                ))
+                    label: star.properName ?? star.bayerFlamsteed))
             }
             points.sort { $0.magnitude < $1.magnitude }
             starField = points
@@ -356,7 +393,6 @@ struct ContentView: View {
             starField = []
         }
 
-        // Constellations
         if filters.showConstellations {
             constellationPaths = store.constellations.map { constellation in
                 var sum = SIMD3<Double>(0, 0, 0)
@@ -376,11 +412,74 @@ struct ContentView: View {
         }
     }
 
+    // MARK: Calibration
+
+    private var calibrationTargetLabel: String {
+        calibrationOptions.first { $0.id == calibrationTarget }?.label ?? calibrationTarget
+    }
+
+    private func startCalibration() {
+        guard let latitude = provider.latitude, let longitude = provider.longitude else { return }
+        let location = GeographicLocation(latitude: .degrees(latitude), longitude: .degrees(longitude))
+        let jd = JulianDay(Date())
+        func altitude(_ equatorial: EquatorialCoordinates) -> Double {
+            CoordinateTransform.horizontal(equatorial, at: location, time: jd).altitude.degrees
+        }
+
+        var options: [CalibrationOption] = []
+        let sunUp = altitude(Sun.position(at: jd)) > 0
+        let moonUp = altitude(Moon.position(at: jd)) > 0
+        options.append(CalibrationOption(id: "Sun", label: sunUp ? "Sun" : "Sun (below horizon)"))
+        options.append(CalibrationOption(id: "Moon", label: moonUp ? "Moon" : "Moon (below horizon)"))
+        if let star = brightestUpStar(location: location, jd: jd), let name = star.properName {
+            options.append(CalibrationOption(id: name, label: name))
+        }
+        calibrationOptions = options
+        calibrationTarget = sunUp ? "Sun" : (moonUp ? "Moon" : options.first?.id ?? "Sun")
+        calibrating = true
+    }
+
+    private func brightestUpStar(location: GeographicLocation, jd: JulianDay) -> Star? {
+        guard let catalog = store.catalog else { return nil }
+        var best: Star?
+        for star in catalog.stars where star.properName != nil {
+            let altitude = CoordinateTransform.horizontal(star.equatorial, at: location, time: jd).altitude.degrees
+            if altitude > 15, best == nil || star.apparentMagnitude < best!.apparentMagnitude { best = star }
+        }
+        return best
+    }
+
+    private func alignCalibration() {
+        guard let latitude = provider.latitude, let longitude = provider.longitude,
+              let frame = arController.currentFrame else { return }
+        let location = GeographicLocation(latitude: .degrees(latitude), longitude: .degrees(longitude))
+        let jd = JulianDay(Date())
+
+        let trueAzimuth: Double
+        switch calibrationTarget {
+        case "Sun": trueAzimuth = CoordinateTransform.horizontal(Sun.position(at: jd), at: location, time: jd).azimuth.degrees
+        case "Moon": trueAzimuth = CoordinateTransform.horizontal(Moon.position(at: jd), at: location, time: jd).azimuth.degrees
+        default:
+            guard let star = store.catalog?.star(named: calibrationTarget) else { return }
+            trueAzimuth = CoordinateTransform.horizontal(star.equatorial, at: location, time: jd).azimuth.degrees
+        }
+
+        let columns = frame.camera.transform.columns.2
+        let forward = SIMD3<Double>(-Double(columns.x), -Double(columns.y), -Double(columns.z)) // east, up, south
+        let reportedAzimuth = atan2(forward.x, -forward.z) * 180 / .pi
+        azimuthOffset = signedDelta(reportedAzimuth - trueAzimuth)
+        calibrating = false
+    }
+
     // MARK: Helpers
 
     private func labelMagnitudeLimit(_ fov: Double) -> Double {
-        let t = max(0, min(1, (95 - fov) / (95 - 18)))   // 0 wide, 1 zoomed-in
+        let t = max(0, min(1, (95 - fov) / (95 - 18)))
         return 1.6 + t * (5.0 - 1.6)
+    }
+
+    private func within(_ point: CGPoint, _ size: CGSize, margin: CGFloat) -> Bool {
+        point.x > -margin && point.x < size.width + margin && point.y > -margin && point.y < size.height + margin
     }
 
     private func turnHint(_ body: ProjectedBody) -> String {
@@ -390,10 +489,12 @@ struct ContentView: View {
     }
 
     private var statusMessage: String {
+        if mode == .ar && !ARCameraController.isSupported { return "AR isn't supported on this device." }
         if !provider.isAuthorized && provider.authorization != .notDetermined {
             return "Location access is off — enable it in Settings to map your sky."
         }
         if !provider.hasLocation { return "Finding your location…" }
+        if mode == .ar { return "Starting camera…" }
         return "Calibrating compass — move the phone in a figure-8."
     }
 
@@ -454,15 +555,19 @@ private struct SolarState {
     let bodies: [ProjectedBody]
 }
 
+private struct CalibrationOption: Identifiable {
+    let id: String
+    let label: String
+}
+
 private struct StarSelection {
     let title: String
     let subtitle: String
 
     init(star: Star) {
         title = star.properName ?? star.bayerFlamsteed ?? star.hipparcos.map { "HIP \($0)" } ?? "Star \(star.id)"
-        var parts: [String] = [String(format: "mag %.1f", star.apparentMagnitude)]
+        var parts = [String(format: "mag %.1f", star.apparentMagnitude)]
         if let constellation = star.constellation { parts.append(constellation) }
-        if let spectral = star.spectralType { parts.append(spectral) }
         subtitle = parts.joined(separator: " · ")
     }
 }
