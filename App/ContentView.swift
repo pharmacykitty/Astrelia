@@ -17,6 +17,8 @@ struct ContentView: View {
     @State private var arController = ARCameraController()
     @State private var filters = SkyFilters()
     @State private var showFilters = false
+    @State private var showMenu = false
+    @State private var uiRotation = 0.0   // chrome rotation (degrees) to stay upright as the phone tilts
 
     @State private var mode: SkyMode = .virtual
     @State private var starField: [StarPoint] = []          // sorted brightest-first
@@ -91,14 +93,18 @@ struct ContentView: View {
         .onChange(of: filters) { _, _ in refreshSky() }
         .task {
             while !Task.isCancelled {
+                updateInterfaceRotation()
                 updateAutoCalibration()
                 refreshSky()
-                try? await Task.sleep(for: .milliseconds(400))
+                try? await Task.sleep(for: .milliseconds(200))
             }
         }
         .sheet(isPresented: $showFilters) {
             FilterSheet(filters: $filters, catalog: store.catalog)
                 .presentationDetents([.medium, .large])
+        }
+        .sheet(isPresented: $showMenu) {
+            MoreMenuView()
         }
     }
 
@@ -185,6 +191,7 @@ struct ContentView: View {
                     Text(body.name).font(.caption.weight(.semibold)).foregroundStyle(.white)
                 }
                 .shadow(radius: 2)
+                .rotationEffect(.degrees(uiRotation))
                 .position(point)
             }
         }
@@ -201,26 +208,32 @@ struct ContentView: View {
         Circle().stroke(.white.opacity(0.3), lineWidth: 1).frame(width: 44, height: 44)
     }
 
+    private func circleButton(_ systemName: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.title3).foregroundStyle(.white)
+                .padding(10).background(.white.opacity(0.16), in: Circle())
+        }
+    }
+
     private func chrome(size: CGSize) -> some View {
         VStack(spacing: 12) {
-            ZStack {
-                Text("Astrolabe")
-                    .font(.system(.title2, design: .serif).weight(.bold))
-                    .foregroundStyle(.white).shadow(radius: 3)
-                HStack {
-                    Picker("Mode", selection: $mode) {
-                        Text("Sky").tag(SkyMode.virtual)
-                        Text("AR").tag(SkyMode.ar)
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(width: 120)
-                    Spacer()
-                    Button { showFilters = true } label: {
-                        Image(systemName: "slider.horizontal.3")
-                            .font(.title3).foregroundStyle(.white)
-                            .padding(10).background(.white.opacity(0.16), in: Circle())
-                    }
+            HStack(spacing: 12) {
+                circleButton("square.grid.2x2") { showMenu = true }
+                    .rotationEffect(.degrees(uiRotation))
+
+                Picker("Mode", selection: $mode) {
+                    Text("Sky").tag(SkyMode.virtual)
+                    Text("AR").tag(SkyMode.ar)
                 }
+                .pickerStyle(.segmented)
+                .frame(width: 120)
+                .rotationEffect(.degrees(uiRotation))
+
+                Spacer()
+
+                circleButton("slider.horizontal.3") { showFilters = true }
+                    .rotationEffect(.degrees(uiRotation))
             }
             .padding(.top, 8)
 
@@ -503,6 +516,19 @@ struct ContentView: View {
         azimuthOffset = signedDelta(reportedAzimuth - trueAzimuth)
         manuallyCalibrated = true
         calibrating = false
+    }
+
+    /// Rotate the chrome (controls + Sun/Moon labels) to stay upright as the phone
+    /// is tilted, snapping to the nearest 90°. The sky itself stays put.
+    private func updateInterfaceRotation() {
+        guard let gravity = provider.gravity else { return }
+        let horizontal = (gravity.x * gravity.x + gravity.y * gravity.y).squareRoot()
+        guard horizontal > 0.5 else { return }   // too flat to tell which way is down
+        let degrees = atan2(gravity.x, -gravity.y) * 180 / .pi
+        let target = -((degrees / 90).rounded() * 90)
+        if abs(signedDelta(target - uiRotation)) > 1 {
+            withAnimation(.spring(duration: 0.35)) { uiRotation = target }
+        }
     }
 
     /// Until a manual Align, keep the AR heading roughly right by matching ARKit's

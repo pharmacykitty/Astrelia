@@ -25,6 +25,12 @@ final class SkyMotionProvider: NSObject, CLLocationManagerDelegate {
     /// Latest device attitude as a rotation matrix (reference → device).
     var rotationMatrix: CMRotationMatrix? { motion.deviceMotion?.attitude.rotationMatrix }
 
+    /// Gravity direction in the device frame — used to keep UI chrome upright as the
+    /// phone is tilted. In portrait this is roughly (0, −1, 0).
+    var gravity: (x: Double, y: Double, z: Double)? {
+        motion.deviceMotion.map { ($0.gravity.x, $0.gravity.y, $0.gravity.z) }
+    }
+
     var hasLocation: Bool { latitude != nil && longitude != nil }
     var isAuthorized: Bool {
         authorization == .authorizedWhenInUse || authorization == .authorizedAlways

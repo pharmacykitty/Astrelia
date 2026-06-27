@@ -38,7 +38,9 @@ Both consume the same `CelestialCore` data — Sky mode uses horizontal coordina
 Keep the math/data **platform-agnostic and unit-tested**, isolated from UI and sensors.
 
 ```
-App/                       # SwiftUI iOS app target (sensors, rendering)
+App/                       # SwiftUI iOS app target
+  Sky/                     # ✅ sensors, AR, projection (SkyCamera/SkyMotionProvider/ARCameraController)
+  Screens/                 # placeholder screens (Catalog/Galaxy Map/Astrology/About) — populate later
 project.yml                # XcodeGen spec — the .xcodeproj is generated, not committed
 Packages/
   CelestialCore/           # local Swift package — NO UIKit/SwiftUI deps
