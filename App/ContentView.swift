@@ -51,11 +51,14 @@ struct ContentView: View {
                         bodyNodes(state)
                     }
                     reticle
+                    // Transparent hit layer for sky taps/zoom — sits BELOW the chrome
+                    // so the mode toggle, filter button, etc. still receive their taps.
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .gesture(tapGesture(size: geometry.size))
+                        .simultaneousGesture(zoomGesture)
                     chrome(state: state)
                 }
-                .contentShape(Rectangle())
-                .gesture(tapGesture(size: geometry.size))
-                .simultaneousGesture(zoomGesture)
             }
         }
         .ignoresSafeArea()
