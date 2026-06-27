@@ -34,31 +34,40 @@ struct ContentView: View {
 
     var body: some View {
         GeometryReader { geometry in
-            TimelineView(.animation) { timeline in
-                let camera = makeSkyCamera(size: geometry.size)
-                let effectiveFOV = mode == .virtual ? fieldOfView : 55.0
-                let state = camera.flatMap { solarState(camera: $0, size: geometry.size, date: timeline.date) }
-                ZStack {
-                    if mode == .ar {
-                        ARCameraView(controller: arController).ignoresSafeArea()
-                    } else {
-                        background
-                    }
-                    if let camera {
-                        skyCanvas(camera: camera, effectiveFOV: effectiveFOV, size: geometry.size)
-                    }
-                    if let state, filters.showSunMoon {
-                        bodyNodes(state)
-                    }
-                    reticle
-                    // Transparent hit layer for sky taps/zoom — sits BELOW the chrome
-                    // so the mode toggle, filter button, etc. still receive their taps.
-                    Color.clear
-                        .contentShape(Rectangle())
-                        .gesture(tapGesture(size: geometry.size))
-                        .simultaneousGesture(zoomGesture)
-                    chrome(state: state)
+            let size = geometry.size
+            ZStack {
+                if mode == .ar {
+                    ARCameraView(controller: arController).ignoresSafeArea()
+                } else {
+                    background
                 }
+
+                // Only the fast-moving sky lives in TimelineView (rebuilt every frame).
+                // Interactive controls are kept OUT of it, else the 60fps rebuilds
+                // cancel their taps (the mode toggle wouldn't switch).
+                TimelineView(.animation) { timeline in
+                    let camera = makeSkyCamera(size: size)
+                    let effectiveFOV = mode == .virtual ? fieldOfView : 55.0
+                    ZStack {
+                        if let camera {
+                            skyCanvas(camera: camera, effectiveFOV: effectiveFOV, size: size)
+                            if filters.showSunMoon,
+                               let state = solarState(camera: camera, size: size, date: timeline.date) {
+                                bodyNodes(state)
+                            }
+                        }
+                    }
+                }
+
+                reticle
+
+                // Sky taps/zoom, below the chrome.
+                Color.clear
+                    .contentShape(Rectangle())
+                    .gesture(tapGesture(size: size))
+                    .simultaneousGesture(zoomGesture)
+
+                chrome(size: size)
             }
         }
         .ignoresSafeArea()
@@ -180,7 +189,7 @@ struct ContentView: View {
         Circle().stroke(.white.opacity(0.3), lineWidth: 1).frame(width: 44, height: 44)
     }
 
-    private func chrome(state: SolarState?) -> some View {
+    private func chrome(size: CGSize) -> some View {
         VStack(spacing: 12) {
             ZStack {
                 Text("Astrolabe")
@@ -207,7 +216,11 @@ struct ContentView: View {
             if mode == .ar { calibrationBar() }
 
             Spacer()
-            bottomPanel(state)
+            // Live readout, refreshed calmly (kept out of the 60fps render loop).
+            TimelineView(.periodic(from: .now, by: 0.25)) { _ in
+                let camera = makeSkyCamera(size: size)
+                bottomPanel(camera.flatMap { solarState(camera: $0, size: size, date: Date()) })
+            }
         }
         .padding()
     }
