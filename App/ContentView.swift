@@ -75,7 +75,14 @@ struct ContentView: View {
         .onAppear { provider.start(); store.loadIfNeeded() }
         .onDisappear { provider.stop(); arController.stop() }
         .onChange(of: mode) { _, newMode in
-            if newMode == .ar { arController.start() } else { arController.stop() }
+            if newMode == .ar {
+                arController.start()
+                // With .gravity alignment the heading is arbitrary until aligned,
+                // so prompt calibration the first time in.
+                if azimuthOffset == 0 { startCalibration() }
+            } else {
+                arController.stop()
+            }
         }
         .onChange(of: filters) { _, _ in refreshSky() }
         .task {

@@ -33,8 +33,10 @@ struct SkyCamera {
     }
 
     /// ARKit camera mode: project through the real camera's view/projection matrices
-    /// (so overlays line up with the live image), with an azimuth calibration offset
-    /// rotating everything about the vertical to cancel compass error.
+    /// (so overlays line up with the live image). The azimuth offset (from manual
+    /// calibration) rotates everything about the vertical to supply absolute heading
+    /// — under `.gravity` alignment ARKit's starting heading is arbitrary, and this
+    /// offset absorbs it.
     static func ar(camera: ARCamera, azimuthOffset: Angle, size: CGSize,
                    orientation: UIInterfaceOrientation = .portrait) -> SkyCamera {
         let view = camera.viewMatrix(for: orientation)
