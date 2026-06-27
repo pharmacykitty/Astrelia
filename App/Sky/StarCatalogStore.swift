@@ -7,6 +7,7 @@ import CelestialCore
 @Observable
 final class StarCatalogStore {
     private(set) var catalog: StarCatalog?
+    private(set) var constellations: [Constellation] = []
     private(set) var isLoading = false
 
     func loadIfNeeded() {
@@ -14,8 +15,10 @@ final class StarCatalogStore {
         isLoading = true
         Task.detached(priority: .userInitiated) {
             let stars = Self.loadBundledStars()
+            let constellations = ConstellationData.loadBundled()
             await MainActor.run {
                 self.catalog = StarCatalog(stars: stars)
+                self.constellations = constellations
                 self.isLoading = false
             }
         }

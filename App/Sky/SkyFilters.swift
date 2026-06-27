@@ -5,7 +5,8 @@ import CelestialCore
 struct SkyFilters: Equatable {
     var showStars = true
     var magnitudeLimit = 4.5          // faintest star shown (higher = more, dimmer stars)
-    var showLabels = true             // names on the brightest stars
+    var showLabels = true             // names on stars (more appear as you zoom in)
+    var showConstellations = true     // stick-figure lines
     var showSunMoon = true
     var showBelowHorizon = true       // keep showing things beneath the horizon
 }
@@ -19,7 +20,7 @@ struct FilterSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Stars") {
+                Section {
                     Toggle("Show stars", isOn: $filters.showStars)
 
                     VStack(alignment: .leading, spacing: 6) {
@@ -39,6 +40,16 @@ struct FilterSheet: View {
 
                     Toggle("Star labels", isOn: $filters.showLabels)
                         .disabled(!filters.showStars)
+                } header: {
+                    Text("Stars")
+                } footer: {
+                    if filters.showStars && filters.showLabels {
+                        Text("Pinch to zoom in — more names appear as you do. Tap any star to identify it.")
+                    }
+                }
+
+                Section("Figures") {
+                    Toggle("Constellation lines", isOn: $filters.showConstellations)
                 }
 
                 Section("Solar system") {

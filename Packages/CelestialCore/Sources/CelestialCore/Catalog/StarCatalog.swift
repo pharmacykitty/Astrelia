@@ -7,22 +7,31 @@ import Foundation
 public struct StarCatalog: Sendable {
     public let stars: [Star]
 
+    private let indexById: [Int: Int]
     private let indexByHipparcos: [Int: Int]
     private let indexByProperName: [String: Int]   // keyed on lowercased name
 
     public init(stars: [Star]) {
         self.stars = stars
+        var byId: [Int: Int] = [:]
         var byHip: [Int: Int] = [:]
         var byName: [String: Int] = [:]
         for (offset, star) in stars.enumerated() {
+            byId[star.id] = offset
             if let hip = star.hipparcos { byHip[hip] = offset }
             if let name = star.properName { byName[name.lowercased()] = offset }
         }
+        self.indexById = byId
         self.indexByHipparcos = byHip
         self.indexByProperName = byName
     }
 
     public var count: Int { stars.count }
+
+    /// Look up a star by its HYG database id.
+    public func star(id: Int) -> Star? {
+        indexById[id].map { stars[$0] }
+    }
 
     /// Look up a star by its Hipparcos catalog number.
     public func star(hipparcos: Int) -> Star? {
