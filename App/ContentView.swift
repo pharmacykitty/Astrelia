@@ -26,8 +26,12 @@ struct ContentView: View {
     @State private var zoomAnchor = 65.0
     @State private var selection: StarSelection?
 
-    // AR calibration (azimuth offset, degrees) that cancels compass error.
+    // AR calibration (azimuth offset, degrees) supplying absolute heading.
+    // Until the user manually aligns, it's auto-seeded from the compass (CoreMotion);
+    // a manual Align freezes a precise value.
     @State private var azimuthOffset = 0.0
+    @State private var manuallyCalibrated = false
+    @State private var autoSeeded = false
     @State private var calibrating = false
     @State private var calibrationOptions: [CalibrationOption] = []
     @State private var calibrationTarget = "Sun"
@@ -76,10 +80,10 @@ struct ContentView: View {
         .onDisappear { provider.stop(); arController.stop() }
         .onChange(of: mode) { _, newMode in
             if newMode == .ar {
+                // A fresh AR session has an arbitrary heading; re-seed from compass.
                 arController.start()
-                // With .gravity alignment the heading is arbitrary until aligned,
-                // so prompt calibration the first time in.
-                if azimuthOffset == 0 { startCalibration() }
+                manuallyCalibrated = false
+                autoSeeded = false
             } else {
                 arController.stop()
             }
@@ -87,6 +91,7 @@ struct ContentView: View {
         .onChange(of: filters) { _, _ in refreshSky() }
         .task {
             while !Task.isCancelled {
+                updateAutoCalibration()
                 refreshSky()
                 try? await Task.sleep(for: .milliseconds(400))
             }
@@ -268,10 +273,15 @@ struct ContentView: View {
                 Button { startCalibration() } label: {
                     Label("Calibrate", systemImage: "scope").font(.subheadline)
                 }
-                if azimuthOffset != 0 {
-                    Text(String(format: "aligned %+.0f°", azimuthOffset))
-                        .font(.caption).foregroundStyle(.green)
-                    Button("Reset") { azimuthOffset = 0 }.font(.caption).foregroundStyle(.white.opacity(0.7))
+                if manuallyCalibrated {
+                    Text("aligned ✓").font(.caption).foregroundStyle(.green)
+                    Button("Reset") {
+                        manuallyCalibrated = false
+                        autoSeeded = false
+                    }
+                    .font(.caption).foregroundStyle(.white.opacity(0.7))
+                } else {
+                    Text("auto · tap to refine").font(.caption).foregroundStyle(.white.opacity(0.55))
                 }
             }
             .padding(10).background(.ultraThinMaterial, in: Capsule())
@@ -491,7 +501,26 @@ struct ContentView: View {
         let forward = SIMD3<Double>(-Double(columns.x), -Double(columns.y), -Double(columns.z)) // east, up, south
         let reportedAzimuth = atan2(forward.x, -forward.z) * 180 / .pi
         azimuthOffset = signedDelta(reportedAzimuth - trueAzimuth)
+        manuallyCalibrated = true
         calibrating = false
+    }
+
+    /// Until a manual Align, keep the AR heading roughly right by matching ARKit's
+    /// (stable) heading to CoreMotion's compass-referenced heading.
+    private func updateAutoCalibration() {
+        guard mode == .ar, !manuallyCalibrated,
+              let rotation = provider.rotationMatrix,
+              let frame = arController.currentFrame else { return }
+        let trueAzimuth = CameraBasis(rotation).pointing.azimuth.degrees
+        let column = frame.camera.transform.columns.2
+        let reportedAzimuth = atan2(-Double(column.x), Double(column.z)) * 180 / .pi
+        let target = signedDelta(reportedAzimuth - trueAzimuth)
+        if autoSeeded {
+            azimuthOffset += 0.25 * signedDelta(target - azimuthOffset)   // gentle smoothing
+        } else {
+            azimuthOffset = target
+            autoSeeded = true
+        }
     }
 
     // MARK: Helpers
