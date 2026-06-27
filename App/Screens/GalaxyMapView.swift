@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import simd
 import CelestialCore
 
@@ -8,6 +9,7 @@ import CelestialCore
 /// backdrop and exoplanets build on top of it.
 struct GalaxyMapView: View {
     let store: StarCatalogStore
+    @Environment(\.dismiss) private var dismiss
 
     @State private var stars: [GalaxyStar] = []
     @State private var backdrop: [BackdropPoint] = []   // stylized Milky Way (art, not catalogued)
@@ -33,7 +35,6 @@ struct GalaxyMapView: View {
             ZStack {
                 LinearGradient(colors: [Color(red: 0.01, green: 0.01, blue: 0.05), .black],
                                startPoint: .top, endPoint: .bottom)
-                    .ignoresSafeArea()
 
                 Canvas { context, _ in
                     draw(in: context, size: size, viewProjection: viewProjection)
@@ -46,10 +47,20 @@ struct GalaxyMapView: View {
             .simultaneousGesture(zoomGesture)
             .simultaneousGesture(tapGesture(size: size, viewProjection: viewProjection))
         }
-        .navigationTitle("Galaxy Map")
-        .navigationBarTitleDisplayMode(.inline)
+        .ignoresSafeArea()
+        .toolbar(.hidden, for: .navigationBar)
         .task(id: store.catalog?.count ?? 0) { buildStars(); buildBackdrop() }
         .onDisappear { flightTask?.cancel() }
+    }
+
+    /// Device safe-area insets, read directly since the map ignores the safe area
+    /// (so the galaxy fills the screen) but the controls should still stay clear.
+    private var safeInsets: UIEdgeInsets {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .first(where: \.isKeyWindow)?
+            .safeAreaInsets ?? .zero
     }
 
     // MARK: Rendering
@@ -111,8 +122,14 @@ struct GalaxyMapView: View {
     }
 
     private func overlay(size: CGSize, viewProjection: simd_float4x4) -> some View {
-        VStack {
+        VStack(spacing: 0) {
             HStack(spacing: 8) {
+                Button { dismiss() } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.subheadline.weight(.bold)).foregroundStyle(.white)
+                        .frame(width: 36, height: 36)
+                        .background(.ultraThinMaterial, in: Circle())
+                }
                 Text("\(stars.count) stars")
                     .font(.caption.monospacedDigit()).foregroundStyle(.white.opacity(0.6))
                 Spacer()
@@ -126,6 +143,7 @@ struct GalaxyMapView: View {
                 .buttonStyle(.bordered).tint(.white)
             }
             .padding(.horizontal)
+            .padding(.top, safeInsets.top + 4)
 
             Spacer()
 
@@ -134,10 +152,9 @@ struct GalaxyMapView: View {
             } else {
                 Text("Drag to orbit · pinch to zoom · tap a star")
                     .font(.caption).foregroundStyle(.white.opacity(0.45))
-                    .padding(.bottom, 8)
             }
         }
-        .padding(.vertical, 8)
+        .padding(.bottom, safeInsets.bottom + 10)
     }
 
     private func selectionCard(_ star: GalaxyStar) -> some View {
@@ -316,55 +333,74 @@ struct GalaxyMapView: View {
             centre + x * axisA + y * axisB + h * up
         }
 
-        let armColor = Color(red: 0.80, green: 0.87, blue: 1.0)   // bluish young arm stars
-        let discColor = Color(red: 0.93, green: 0.91, blue: 0.85) // diffuse disc
-        let bulgeColor = Color(red: 1.0, green: 0.84, blue: 0.55) // warm central bulge
+        let armColor = Color(red: 0.78, green: 0.86, blue: 1.0)   // bluish young arm stars
+        let hiiColor = Color(red: 1.0, green: 0.50, blue: 0.62)   // pink star-forming knots
+        let discColor = Color(red: 0.92, green: 0.90, blue: 0.84) // diffuse disc
+        let bulgeColor = Color(red: 1.0, green: 0.85, blue: 0.55) // warm central bar/bulge
 
-        let rMax: Float = 16000
+        let rMax: Float = 15000
+        let rInner: Float = 1400
         let arms = 4
-        let pitch: Float = 0.23   // logarithmic-spiral tightness
+        let k: Float = 0.20   // logarithmic-spiral winding (~2 turns across the disc)
+
+        // Spiral angle for a given galactocentric radius.
+        func spiralAngle(_ r: Float) -> Float { Float(log(Double(r / rInner))) / k }
 
         var points: [BackdropPoint] = []
 
-        // Spiral arms — bright, define the structure.
         for armIndex in 0..<arms {
             let offset = Float(armIndex) * (2 * .pi / Float(arms))
-            for _ in 0..<1700 {
-                let theta = rand(0, 1) * 6.0
-                let r = 600 * exp(pitch * theta)
-                if r > rMax { continue }
-                let rr = r + gaussian() * (r * 0.10 + 250)
-                let angle = theta + offset + gaussian() * 0.10
-                let h = gaussian() * (180 + r * 0.012)
+            // Arm stars — sampled by radius so the arm spans the whole disc.
+            for _ in 0..<2200 {
+                let r = rInner + rand(0, 1) * (rMax - rInner)
+                let width = r * 0.05 + 220
+                let rr = r + gaussian() * width
+                let angle = spiralAngle(r) + offset + gaussian() * 0.09
+                let h = gaussian() * (120 + r * 0.010)
+                let bright = max(0.12, 0.55 - 0.32 * (r / rMax))   // brighter toward the centre
                 points.append(BackdropPoint(
                     position: place(cos(angle) * rr, sin(angle) * rr, h),
-                    baseOpacity: Double(rand(0.30, 0.65)),
-                    size: CGFloat(rand(0.7, 1.7)),
+                    baseOpacity: Double(bright) * Double(rand(0.5, 1)),
+                    size: CGFloat(rand(0.6, 1.6)),
                     color: armColor))
+            }
+            // Pink HII regions studding the arms — the iconic star-forming knots.
+            for _ in 0..<110 {
+                let r = rInner + rand(0.1, 1) * (rMax - rInner)
+                let angle = spiralAngle(r) + offset + gaussian() * 0.05
+                let cx = cos(angle) * r, cy = sin(angle) * r
+                points.append(BackdropPoint(
+                    position: place(cx + gaussian() * 170, cy + gaussian() * 170, gaussian() * 110),
+                    baseOpacity: Double(rand(0.3, 0.7)),
+                    size: CGFloat(rand(0.8, 1.9)),
+                    color: hiiColor))
             }
         }
 
-        // Diffuse disc filling between the arms.
-        for _ in 0..<3600 {
+        // Diffuse disc, exponential falloff — fills between the arms faintly.
+        for _ in 0..<2600 {
             let r = sqrt(rand(0, 1)) * rMax
             let angle = rand(0, 2 * .pi)
-            let h = gaussian() * (160 + r * 0.012)
+            let h = gaussian() * (110 + r * 0.010)
+            let bright = max(0.03, 0.15 * exp(-r / 8000))
             points.append(BackdropPoint(
                 position: place(cos(angle) * r, sin(angle) * r, h),
-                baseOpacity: Double(rand(0.05, 0.18)),
-                size: CGFloat(rand(0.5, 1.1)),
+                baseOpacity: Double(bright) * Double(rand(0.4, 1)),
+                size: CGFloat(rand(0.4, 1.0)),
                 color: discColor))
         }
 
-        // Central bulge — dense, warm, brightest; a flattened spheroid.
-        for _ in 0..<2800 {
-            let x = gaussian() * 1700, y = gaussian() * 1700, z = gaussian() * 850
-            let dist = (x * x + y * y + z * z).squareRoot()
-            let opacity = min(0.85, max(0.15, 0.85 - Double(dist) / 3200))
+        // Central bar + bulge — warm, bright, elongated (the Milky Way is a barred spiral).
+        for _ in 0..<2400 {
+            let x = gaussian() * 2600      // elongated along axisA → the bar
+            let y = gaussian() * 1050
+            let z = gaussian() * 650
+            let d = (x * x / (2600 * 2600) + y * y / (1050 * 1050) + z * z / (650 * 650)).squareRoot()
+            let opacity = min(0.9, max(0.12, 0.9 - Double(d) * 0.78))
             points.append(BackdropPoint(
                 position: place(x, y, z),
                 baseOpacity: opacity * Double(rand(0.6, 1)),
-                size: CGFloat(rand(0.7, 1.8)),
+                size: CGFloat(rand(0.7, 1.7)),
                 color: bulgeColor))
         }
 
