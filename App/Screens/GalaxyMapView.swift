@@ -10,6 +10,8 @@ struct GalaxyMapView: View {
     let store: StarCatalogStore
 
     @State private var stars: [GalaxyStar] = []
+    @State private var backdrop: [BackdropPoint] = []   // stylized Milky Way (art, not catalogued)
+    @State private var flightTask: Task<Void, Never>?
 
     // Orbit camera (parsecs).
     @State private var yaw: Float = 0.6
@@ -46,12 +48,24 @@ struct GalaxyMapView: View {
         }
         .navigationTitle("Galaxy Map")
         .navigationBarTitleDisplayMode(.inline)
-        .task(id: store.catalog?.count ?? 0) { buildStars() }
+        .task(id: store.catalog?.count ?? 0) { buildStars(); buildBackdrop() }
+        .onDisappear { flightTask?.cancel() }
     }
 
     // MARK: Rendering
 
     private func draw(in context: GraphicsContext, size: CGSize, viewProjection: simd_float4x4) {
+        // Stylized Milky Way, drawn first so real stars sit in front of it.
+        for point in backdrop {
+            guard let (p, depth) = project(point.position, viewProjection, size) else { continue }
+            if p.x < -2 || p.x > size.width + 2 || p.y < -2 || p.y > size.height + 2 { continue }
+            let fade = min(1.0, max(0.12, Double(2500 / depth)))
+            context.fill(
+                Path(ellipseIn: CGRect(x: p.x - point.size, y: p.y - point.size, width: point.size * 2, height: point.size * 2)),
+                with: .color(point.color.opacity(point.baseOpacity * fade))
+            )
+        }
+
         for star in stars {
             guard let (point, depth) = project(star.position, viewProjection, size) else { continue }
             if point.x < -4 || point.x > size.width + 4 || point.y < -4 || point.y > size.height + 4 { continue }
@@ -89,7 +103,7 @@ struct GalaxyMapView: View {
                     .font(.caption.monospacedDigit()).foregroundStyle(.white.opacity(0.6))
                 Spacer()
                 Button {
-                    withAnimation(.spring) { resetView() }
+                    animateCamera(to: .zero, distance: 220)
                 } label: {
                     Label("Recenter", systemImage: "scope").font(.caption)
                 }
@@ -125,7 +139,7 @@ struct GalaxyMapView: View {
                 Text(constellation).font(.caption2).foregroundStyle(.white.opacity(0.5))
             }
             Button {
-                withAnimation(.spring) { flyTo(star) }
+                flyTo(star)
             } label: {
                 Label("Fly here", systemImage: "paperplane.fill").font(.subheadline)
             }
@@ -157,14 +171,29 @@ struct GalaxyMapView: View {
         return (point, clip.w)
     }
 
-    private func resetView() {
-        target = .zero; yaw = 0.6; pitch = 0.35; distance = 220; zoomAnchor = 220
+    private func flyTo(_ star: GalaxyStar) {
+        animateCamera(to: star.position, distance: 40)
     }
 
-    private func flyTo(_ star: GalaxyStar) {
-        target = star.position
-        distance = 40
-        zoomAnchor = 40
+    /// Smoothly flies the camera to a new target/distance over `duration` seconds
+    /// (eased straight-line path) instead of teleporting. Driving `target`/`distance`
+    /// per frame from a Task re-renders the Canvas without a persistent TimelineView.
+    private func animateCamera(to newTarget: SIMD3<Float>, distance newDistance: Float, duration: Double = 1.2) {
+        flightTask?.cancel()
+        let startTarget = target
+        let startDistance = distance
+        flightTask = Task { @MainActor in
+            let start = Date()
+            while !Task.isCancelled {
+                let raw = Float(min(1, Date().timeIntervalSince(start) / duration))
+                let eased = raw * raw * (3 - 2 * raw)   // smoothstep
+                target = startTarget + (newTarget - startTarget) * eased
+                distance = startDistance + (newDistance - startDistance) * eased
+                zoomAnchor = distance
+                if raw >= 1 { break }
+                try? await Task.sleep(for: .milliseconds(16))
+            }
+        }
     }
 
     // MARK: Gestures
@@ -172,6 +201,7 @@ struct GalaxyMapView: View {
     private var dragGesture: some Gesture {
         DragGesture()
             .onChanged { value in
+                flightTask?.cancel()
                 let dx = Float(value.translation.width - dragPrevious.width)
                 let dy = Float(value.translation.height - dragPrevious.height)
                 yaw -= dx * 0.005
@@ -183,7 +213,10 @@ struct GalaxyMapView: View {
 
     private var zoomGesture: some Gesture {
         MagnificationGesture()
-            .onChanged { value in distance = min(8000, max(2, zoomAnchor / Float(value))) }
+            .onChanged { value in
+                flightTask?.cancel()
+                distance = min(8000, max(2, zoomAnchor / Float(value)))
+            }
             .onEnded { _ in zoomAnchor = distance }
     }
 
@@ -226,6 +259,58 @@ struct GalaxyMapView: View {
         stars = result
     }
 
+    /// Builds the stylized Milky Way: a faint flattened disc of points in the real
+    /// galactic plane (so the band sits where it actually is relative to the stars)
+    /// plus a warmer bulge toward the galactic centre. Pure art, not catalogued —
+    /// the real near-field stars render in front of it.
+    private func buildBackdrop() {
+        guard backdrop.isEmpty else { return }
+        var rng = SeededGenerator(seed: 99)
+        func rand(_ a: Float, _ b: Float) -> Float { Float(Double.random(in: Double(a)...Double(b), using: &rng)) }
+        func gaussian() -> Float {
+            let u1 = Double.random(in: 1e-6...1, using: &rng)
+            let u2 = Double.random(in: 0...1, using: &rng)
+            return Float((-2 * log(u1)).squareRoot() * cos(2 * Double.pi * u2))
+        }
+        func unit(_ raDeg: Double, _ decDeg: Double) -> SIMD3<Float> {
+            let ra = Float(raDeg * .pi / 180), dec = Float(decDeg * .pi / 180)
+            return SIMD3(cos(dec) * cos(ra), cos(dec) * sin(ra), sin(dec))
+        }
+        // Galactic frame in equatorial coordinates.
+        let gNorth = unit(192.859, 27.128)      // galactic north pole
+        let gCenter = unit(266.405, -28.936)    // direction of the galactic centre (b = 0)
+        let gV = simd_normalize(simd_cross(gNorth, gCenter))
+        let cream = Color(red: 0.95, green: 0.93, blue: 0.86)
+        let gold = Color(red: 1.0, green: 0.86, blue: 0.62)
+
+        var points: [BackdropPoint] = []
+        // The disc — denser/brighter toward the galactic centre to suggest the band.
+        for _ in 0..<2800 {
+            let theta = rand(0, 2 * .pi)
+            let r = sqrt(rand(0, 1)) * 6000 + 250
+            let h = gaussian() * 130
+            let planeDir = cos(theta) * gCenter + sin(theta) * gV
+            let pos = r * planeDir + h * gNorth
+            let centerward = 0.5 + 0.5 * simd_dot(planeDir, gCenter)
+            points.append(BackdropPoint(
+                position: pos,
+                baseOpacity: Double(0.05 + 0.20 * centerward) * Double(rand(0.4, 1)),
+                size: CGFloat(rand(0.5, 1.5)),
+                color: cream))
+        }
+        // The central bulge, far away toward the galactic centre.
+        for _ in 0..<900 {
+            let dir = simd_normalize(gCenter + SIMD3(gaussian(), gaussian(), gaussian()) * 0.18)
+            let pos = dir * (7000 + gaussian() * 1400)
+            points.append(BackdropPoint(
+                position: pos,
+                baseOpacity: Double(rand(0.08, 0.30)),
+                size: CGFloat(rand(0.6, 1.7)),
+                color: gold))
+        }
+        backdrop = points
+    }
+
     private func starColor(_ colorIndex: Double?) -> Color {
         guard let ci = colorIndex else { return .white }
         switch ci {
@@ -248,6 +333,14 @@ private struct GalaxyStar: Identifiable {
     let distanceParsecs: Double
     let name: String
     let constellation: String?
+}
+
+/// A faint, non-interactive point making up the stylized Milky Way backdrop.
+private struct BackdropPoint {
+    let position: SIMD3<Float>
+    let baseOpacity: Double
+    let size: CGFloat
+    let color: Color
 }
 
 // MARK: - 3D matrix helpers
