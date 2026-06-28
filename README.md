@@ -41,7 +41,7 @@ different UI surfaces. The user chooses what they want to see.
   </tr>
   <tr>
     <td align="center"><img src="docs/screenshots/sphere.png" width="240"><br><sub><b>3D celestial sphere</b> — your sky as a globe</sub></td>
-    <td align="center"><img src="docs/screenshots/chart-detail.png" width="240"><br><sub><b>Natal chart</b> — wheel, patterns, readings</sub></td>
+    <td align="center"><img src="docs/screenshots/natal-chart.png" width="240"><br><sub><b>Natal chart</b> — wheel, patterns, readings</sub></td>
     <td align="center"><img src="docs/screenshots/planet.png" width="240"><br><sub><b>Planet detail</b> — physical facts, relatably</sub></td>
   </tr>
 </table>
