@@ -81,6 +81,7 @@ struct MoreMenuView: View {
     @ViewBuilder
     private func destination(_ screen: AppScreen) -> some View {
         switch screen {
+        case .catalog: CatalogView(store: store)
         case .galaxyMap: GalaxyMapView(store: store)
         default: PlaceholderScreen(screen: screen)
         }

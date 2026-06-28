@@ -7,10 +7,18 @@ import CelestialCore
 /// the Sun at the origin). Drag to orbit, pinch to zoom, tap a star to inspect it.
 /// This is the foundation of the flagship Galaxy Map; the stylized Milky Way
 /// backdrop and exoplanets build on top of it.
+/// An optional object to centre on when the Galaxy Map opens (e.g. from the Catalog).
+enum GalaxyMapFocus {
+    case landmark(Landmark)
+    case star(Int)
+}
+
 struct GalaxyMapView: View {
     let store: StarCatalogStore
+    var focus: GalaxyMapFocus? = nil
     @Environment(\.dismiss) private var dismiss
 
+    @State private var focusApplied = false
     @State private var stars: [GalaxyStar] = []
     @State private var backdrop: [BackdropPoint] = []   // stylized Milky Way (art, not catalogued)
     @State private var flightTask: Task<Void, Never>?
@@ -70,7 +78,9 @@ struct GalaxyMapView: View {
         }
         .ignoresSafeArea()
         .toolbar(.hidden, for: .navigationBar)
-        .task(id: store.catalog?.count ?? 0) { buildStars(); buildBackdrop() }
+        .task(id: store.catalog?.count ?? 0) {
+            buildStars(); buildBackdrop(); applyInitialFocusIfNeeded()
+        }
         .onDisappear { flightTask?.cancel(); flyTask?.cancel() }
     }
 
@@ -326,6 +336,22 @@ struct GalaxyMapView: View {
     private func flyTo(_ landmark: Landmark) {
         exitFlyMode()
         animateCamera(to: landmark.positionParsecs, distance: landmark.suggestedViewDistance)
+    }
+
+    /// If opened with a focus (from the Catalog), select it and fly there once ready.
+    private func applyInitialFocusIfNeeded() {
+        guard !focusApplied, let focus else { return }
+        switch focus {
+        case .landmark(let lm):
+            focusApplied = true
+            selection = .landmark(lm)
+            animateCamera(to: lm.positionParsecs, distance: lm.suggestedViewDistance, duration: 1.6)
+        case .star(let id):
+            guard let gs = stars.first(where: { $0.id == id }) else { return }   // wait for stars to build
+            focusApplied = true
+            selection = .star(gs)
+            animateCamera(to: gs.position, distance: 40, duration: 1.6)
+        }
     }
 
     /// Flies the camera out to a face-on view of the whole galaxy, centred on Sgr A*.

@@ -1,6 +1,7 @@
 import SwiftUI
 import ARKit
 import RealityKit
+import AVFoundation
 
 /// Owns the ARKit session and the `ARView` that shows the live camera feed.
 ///
@@ -20,6 +21,31 @@ final class ARCameraController {
 
     func start() {
         guard ARWorldTrackingConfiguration.isSupported else { return }
+        // We drive the session ourselves (with `.gravity` alignment); without this,
+        // RealityKit runs its own config early — before camera permission resolves —
+        // and races our run, which can leave the passthrough feed blank.
+        arView.automaticallyConfigureSession = false
+
+        // ARKit will only show the camera once permission is granted. Don't rely on
+        // its implicit prompt (which doesn't reliably fire here, e.g. on a fresh
+        // sideload where authorization resets to `.notDetermined`): request explicitly
+        // and run the session as soon as access is granted.
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            runSession()
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
+                guard granted else { return }
+                Task { @MainActor in self?.runSession() }
+            }
+        case .denied, .restricted:
+            break   // The UI surfaces an "enable in Settings" prompt for this case.
+        @unknown default:
+            break
+        }
+    }
+
+    private func runSession() {
         let configuration = ARWorldTrackingConfiguration()
         configuration.worldAlignment = .gravity
         configuration.planeDetection = []
