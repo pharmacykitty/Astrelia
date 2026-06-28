@@ -154,6 +154,51 @@ enum StarFacts {
         return "About the size of the Sun."
     }
 
+    // MARK: Stellar life story (narrative astrophysics)
+
+    /// A one-sentence "biography" of a star from its spectral and luminosity class:
+    /// roughly how long it lives and how it ends. Turns the catalog into stories
+    /// rather than a spreadsheet. `nil` when the spectral type is missing or is a
+    /// kind we don't narrate (e.g. brown dwarfs, carbon stars). General stellar
+    /// evolution; see About → Sources.
+    static func lifeStory(for star: Star) -> String? {
+        guard let raw = star.spectralType?.trimmingCharacters(in: .whitespaces),
+              let cls = raw.uppercased().first(where: { "OBAFGKM".contains($0) }) else { return nil }
+        let lum = luminosityClass(in: raw) ?? ""
+
+        if lum.contains("white dwarf") {
+            return "A white dwarf — the dense, cooling ember left when a Sun-like star cast off its outer layers. No longer fusing, it will fade slowly over billions of years."
+        }
+        if lum.contains("supergiant") {
+            return "A supergiant in the final act of its life — vastly luminous and short-lived, destined to explode as a supernova."
+        }
+        if lum.contains("giant") {   // covers "giant" and "bright giant"
+            return "A giant past its main-sequence prime: its core hydrogen spent, it has swelled and cooled, on its way to shedding its outer layers."
+        }
+        if lum.contains("subgiant") {
+            return "A subgiant just leaving the main sequence, beginning to swell as the hydrogen in its core runs low."
+        }
+
+        // Main sequence (or unannotated) — lifetime and fate scale with mass, which
+        // the spectral class stands in for.
+        switch cls {
+        case "O", "B":
+            return "A hot, massive star burning through its fuel in just a few to a few tens of millions of years — it will end in a supernova, leaving a neutron star or black hole."
+        case "A":
+            return "A main-sequence star a couple of times the Sun's mass; it will shine for one to two billion years before swelling into a red giant and ending as a white dwarf."
+        case "F":
+            return "A main-sequence star a little hotter than the Sun, with a few billion years ahead before it becomes a red giant and then a white dwarf."
+        case "G":
+            return "A Sun-like main-sequence star with a roughly ten-billion-year life; one day it will swell into a red giant and end as a slowly cooling white dwarf."
+        case "K":
+            return "An orange main-sequence star that burns slowly and steadily — it can shine for many tens of billions of years before fading."
+        case "M":
+            return "A red dwarf so frugal with its fuel it could keep burning for trillions of years — far longer than the current age of the universe."
+        default:
+            return nil
+        }
+    }
+
     // MARK: Number formatting
 
     /// Compact human number: "1.5", "120", "17k", "1.2M".

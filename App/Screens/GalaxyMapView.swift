@@ -121,22 +121,28 @@ struct GalaxyMapView: View {
         let halfH = Double(size.height) * 0.5
         let maxDim = Double(max(size.width, size.height))
 
-        // Broad warm glow for the galactic core/bulge — a soft luminous centre.
-        // The disc/arm haze is no longer a flat circle: it comes from the bloom
-        // pass over the real point field below, so it follows the true spiral/bar
-        // shape and viewing angle instead of reading as a smudge.
+        // Grand luminous core: three stacked gradients — a wide amber halo, a gold
+        // mid-glow, and a hot near-white nucleus — so the galactic centre reads as a
+        // radiant heart rather than a flat blob. The disc/arm haze comes from the
+        // bloom pass below, following the true spiral/bar shape and viewing angle.
         if showMilkyWay, let (cp, cdepth) = project(Galactic.centerPosition, viewProjection, size), cdepth > 0 {
             let pxPerPc = halfH * focal / Double(cdepth)
-            let coreR = CGFloat(min(maxDim * 0.9, 3000 * pxPerPc))
-            if coreR > 4 {
+            func disc(_ rad: CGFloat, _ colors: [Color]) {
+                guard rad > 4 else { return }
                 context.drawLayer { layer in
                     layer.blendMode = .plusLighter
-                    layer.fill(Path(ellipseIn: CGRect(x: cp.x - coreR, y: cp.y - coreR, width: coreR * 2, height: coreR * 2)),
-                               with: .radialGradient(Gradient(colors: [Color(red: 1.0, green: 0.92, blue: 0.74).opacity(0.42),
-                                                                        Color(red: 1.0, green: 0.85, blue: 0.6).opacity(0.12), .clear]),
-                                                     center: cp, startRadius: 0, endRadius: coreR))
+                    layer.fill(Path(ellipseIn: CGRect(x: cp.x - rad, y: cp.y - rad, width: rad * 2, height: rad * 2)),
+                               with: .radialGradient(Gradient(colors: colors), center: cp, startRadius: 0, endRadius: rad))
                 }
             }
+            disc(CGFloat(min(maxDim * 1.4, 6500 * pxPerPc)),       // broad amber halo
+                 [Color(red: 1.0, green: 0.74, blue: 0.42).opacity(0.16), .clear])
+            disc(CGFloat(min(maxDim * 0.8, 2600 * pxPerPc)),       // gold mid-glow
+                 [Color(red: 1.0, green: 0.86, blue: 0.6).opacity(0.40),
+                  Color(red: 1.0, green: 0.8, blue: 0.5).opacity(0.12), .clear])
+            disc(CGFloat(min(maxDim * 0.32, 900 * pxPerPc)),       // hot near-white nucleus
+                 [Color(red: 1.0, green: 0.98, blue: 0.9).opacity(0.7),
+                  Color(red: 1.0, green: 0.9, blue: 0.7).opacity(0.25), .clear])
         }
 
         // Stylized Milky Way point field, drawn in two additive passes for a
@@ -162,6 +168,24 @@ struct GalaxyMapView: View {
                     for l in backdropOpacityLevels.indices {
                         layer.fill(paths[c][l], with: .color(backdropPalette[c].opacity(backdropOpacityLevels[l] * 0.55)))
                     }
+                }
+            }
+            // Dust lanes — dark filaments along the inner arm edges, drawn with normal
+            // blending so they *subtract* light from the bloom (carving the galaxy's
+            // characteristic dark veins). Batched by opacity into a handful of fills.
+            var dustPaths = Array(repeating: Path(), count: backdropOpacityLevels.count)
+            for d in backdropDust {
+                guard let (p, depth) = project(d.position, viewProjection, size) else { continue }
+                if p.x < -8 || p.x > size.width + 8 || p.y < -8 || p.y > size.height + 8 { continue }
+                let r = d.size * CGFloat(min(4.0, max(0.6, Double(900 / depth))))
+                if r < 0.5 { continue }
+                let lvl = min(backdropOpacityLevels.count - 1, Int(d.baseOpacity * Double(backdropOpacityLevels.count)))
+                dustPaths[lvl].addEllipse(in: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2))
+            }
+            context.drawLayer { layer in
+                layer.addFilter(.blur(radius: 4))
+                for l in backdropOpacityLevels.indices {
+                    layer.fill(dustPaths[l], with: .color(backdropDustColor.opacity(min(0.9, backdropOpacityLevels[l] * 1.4))))
                 }
             }
             context.drawLayer { layer in            // crisp cores
@@ -936,39 +960,71 @@ struct GalaxyMapView: View {
             centre + x * axisA + y * axisB + h * up
         }
 
-        let armBucket = 0, hiiBucket = 1, discBucket = 2, bulgeBucket = 3
+        // Palette buckets (see backdropPalette): 0 cool-blue arm · 1 warm-white arm ·
+        // 2 pink HII · 3 disc haze · 4 gold bulge · 5 pale halo · 6 blue clusters.
+        let armCool = 0, armWarm = 1, hiiBucket = 2, discBucket = 3, bulgeBucket = 4, haloBucket = 5, blueBucket = 6
 
-        let rMax: Float = 15000
+        let rMax: Float = 16500
         let rInner: Float = 2400   // arms emanate from the ends of the bar
         let arms = 4
-        let k: Float = 0.22        // logarithmic-spiral winding (~1.3 turns)
+        let k: Float = 0.235       // logarithmic-spiral winding — a touch more open/sweeping
 
         // Spiral angle for a given galactocentric radius.
         func spiralAngle(_ r: Float) -> Float { Float(log(Double(r / rInner))) / k }
 
         var points: [BackdropPoint] = []
+        var dust: [BackdropPoint] = []
 
         // Two major arms (from the bar ends) + two minor arms, like the real galaxy.
-        // Counts are kept modest (and brighter per point) for rendering performance.
+        // Each arm has a bright ridge of stars, a colour gradient (warm inside → cool
+        // blue outside), pink HII knots, blue young-cluster tips, feathered spurs, and
+        // a dark dust lane riding its inner edge.
         for armIndex in 0..<arms {
             let offset = Float(armIndex) * (.pi / 2)
             let major = (armIndex % 2 == 0)
             // Denser + smaller points read as smooth arm structure rather than
             // chunky dots; the bloom pass fuses them into a continuous lane.
-            let starCount = major ? 4200 : 2300
-            let knotCount = major ? 150 : 80
+            let starCount = major ? 5200 : 2800
+            let knotCount = major ? 170 : 90
             let weight: Float = major ? 1.0 : 0.6
             for _ in 0..<starCount {
                 let r = rInner + rand(0, 1) * (rMax - rInner)
                 let rr = r + gaussian() * (r * 0.045 + 200)
                 let angle = spiralAngle(r) + offset + gaussian() * 0.085
-                let h = gaussian() * (115 + r * 0.010)
-                let bright = max(0.07, 0.40 - 0.24 * (r / rMax)) * weight
+                let h = gaussian() * (110 + r * 0.010)
+                let frac = r / rMax
+                let bright = max(0.06, 0.42 - 0.26 * frac) * weight
+                // Warm-white toward the core, cool-blue toward the rim; a sprinkle of
+                // bright young-blue clusters out along the arms.
+                let warmProb = Double(max(0, 0.85 - frac * 1.25))
+                let bucket: Int
+                if rand(0, 1) < 0.05 && frac > 0.25 { bucket = blueBucket }
+                else { bucket = Double.random(in: 0...1, using: &rng) < warmProb ? armWarm : armCool }
                 points.append(BackdropPoint(
                     position: place(cos(angle) * rr, sin(angle) * rr, h),
-                    colorBucket: armBucket,
+                    colorBucket: bucket,
                     baseOpacity: Double(bright) * Double(rand(0.45, 1)),
                     size: CGFloat(rand(0.5, 1.3))))
+            }
+            // Feathered spurs: short segments branching off the arm, breaking its
+            // outline so the arms look turbulent and rich rather than clean ribbons.
+            let spurs = major ? 14 : 8
+            for _ in 0..<spurs {
+                let r0 = rInner + rand(0.12, 0.92) * (rMax - rInner)
+                let a0 = spiralAngle(r0) + offset
+                let spurAng = a0 + rand(-0.9, 0.9)
+                let len = rand(300, 1100)
+                let cx0 = cos(a0) * r0, cy0 = sin(a0) * r0
+                for _ in 0..<55 {
+                    let t = rand(0, 1)
+                    let cx = cx0 + cos(spurAng) * len * t + gaussian() * 120
+                    let cy = cy0 + sin(spurAng) * len * t + gaussian() * 120
+                    points.append(BackdropPoint(
+                        position: place(cx, cy, gaussian() * 130),
+                        colorBucket: rand(0, 1) < 0.5 ? armCool : armWarm,
+                        baseOpacity: Double(rand(0.08, 0.3)) * Double(weight),
+                        size: CGFloat(rand(0.45, 1.1))))
+                }
             }
             // Pink HII regions studding the arms — the iconic star-forming knots.
             for _ in 0..<knotCount {
@@ -978,17 +1034,29 @@ struct GalaxyMapView: View {
                 points.append(BackdropPoint(
                     position: place(cx + gaussian() * 170, cy + gaussian() * 170, gaussian() * 110),
                     colorBucket: hiiBucket,
-                    baseOpacity: Double(rand(0.28, 0.6)) * Double(weight),
+                    baseOpacity: Double(rand(0.3, 0.62)) * Double(weight),
                     size: CGFloat(rand(0.8, 1.8))))
+            }
+            // Dust lane: a dark, thin filament riding just inside the arm ridge, with
+            // its own clumpy sub-structure — drawn later to subtract light from the glow.
+            for _ in 0..<2200 {
+                let r = rInner + rand(0.04, 1) * (rMax - rInner)
+                let angle = spiralAngle(r) + offset - 0.085 + gaussian() * 0.05   // inner edge
+                let rr = r + gaussian() * (r * 0.02 + 90)
+                dust.append(BackdropPoint(
+                    position: place(cos(angle) * rr, sin(angle) * rr, gaussian() * 70),
+                    colorBucket: 0,
+                    baseOpacity: Double(rand(0.25, 0.7)) * Double(weight),
+                    size: CGFloat(rand(1.4, 3.4))))
             }
         }
 
         // Diffuse disc, exponential falloff — fills between the arms with a faint haze.
-        for _ in 0..<4500 {
+        for _ in 0..<5200 {
             let r = sqrt(rand(0, 1)) * rMax
             let angle = rand(0, 2 * .pi)
-            let h = gaussian() * (105 + r * 0.010)
-            let bright = max(0.025, 0.13 * exp(-r / 8000))
+            let h = gaussian() * (100 + r * 0.010)
+            let bright = max(0.022, 0.12 * exp(-r / 8500))
             points.append(BackdropPoint(
                 position: place(cos(angle) * r, sin(angle) * r, h),
                 colorBucket: discBucket,
@@ -997,12 +1065,12 @@ struct GalaxyMapView: View {
         }
 
         // Central bar + bulge — warm, bright, elongated (the Milky Way is a barred spiral).
-        for _ in 0..<4200 {
-            let x = gaussian() * 2700      // elongated along axisA → the bar
-            let y = gaussian() * 1050
-            let z = gaussian() * 650
-            let d = (x * x / (2700 * 2700) + y * y / (1050 * 1050) + z * z / (650 * 650)).squareRoot()
-            let opacity = min(0.85, max(0.10, 0.85 - Double(d) * 0.66))
+        for _ in 0..<5000 {
+            let x = gaussian() * 2900      // elongated along axisA → the bar
+            let y = gaussian() * 1100
+            let z = gaussian() * 680
+            let d = (x * x / (2900 * 2900) + y * y / (1100 * 1100) + z * z / (680 * 680)).squareRoot()
+            let opacity = min(0.9, max(0.10, 0.9 - Double(d) * 0.66))
             points.append(BackdropPoint(
                 position: place(x, y, z),
                 colorBucket: bulgeBucket,
@@ -1010,7 +1078,21 @@ struct GalaxyMapView: View {
                 size: CGFloat(rand(0.6, 1.6))))
         }
 
+        // Faint spherical stellar halo — old stars enveloping the disc, giving the
+        // galaxy a sense of depth and grandeur beyond the flat plane.
+        for _ in 0..<2600 {
+            let dir = SIMD3<Float>(gaussian(), gaussian(), gaussian())
+            let rad = pow(rand(0, 1), 0.5) * 9000 + 600
+            let p = simd_normalize(dir + SIMD3(1e-5, 0, 0)) * rad
+            points.append(BackdropPoint(
+                position: centre + p.x * axisA + p.y * axisB + p.z * up,
+                colorBucket: haloBucket,
+                baseOpacity: Double(rand(0.02, 0.12)) * Double(max(0.1, 1 - rad / 9600)),
+                size: CGFloat(rand(0.4, 0.9))))
+        }
+
         backdrop = points
+        backdropDust = dust
     }
 
     private func starBucket(_ colorIndex: Double?) -> Int {

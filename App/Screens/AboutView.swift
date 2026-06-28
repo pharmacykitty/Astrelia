@@ -157,6 +157,9 @@ enum SourceCatalog {
             SourceEntry(name: "Stefan–Boltzmann law",
                         detail: "Relates a star's luminosity, radius, and temperature (L ∝ R²T⁴); used with IAU 2015 nominal solar values to derive each star's approximate radius for the size comparisons.",
                         license: "Reference"),
+            SourceEntry(name: "Stellar evolution (general)",
+                        detail: "The plain-language 'life story' of each star — main-sequence lifetimes by spectral class and end states (white dwarf, supernova) — follows standard stellar-astrophysics references.",
+                        license: "Reference"),
         ]),
         SourceGroup(title: "Astrology", tint: .orange, entries: [
             SourceEntry(name: "Rolled our own",

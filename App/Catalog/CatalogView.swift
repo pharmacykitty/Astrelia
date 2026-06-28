@@ -274,11 +274,18 @@ private struct StarDetailView: View {
     let store: StarCatalogStore
     let exo: ExoplanetStore
 
+    @State private var hrPopulation: [HRPoint] = []
+
     private var temperature: Double? { StarFacts.temperatureKelvin(colorIndex: star.colorIndex) }
     private var summary: String? { StarFacts.summary(for: star.properName) }
     private var spectral: String? { StarFacts.spectralDescription(star.spectralType) }
     private var radiusSolar: Double? { StarFacts.radiusSolar(for: star) }
     private var facts: [String] { StarFacts.relatableFacts(for: star) }
+    private var lifeStory: String? { StarFacts.lifeStory(for: star) }
+    private var hrHighlight: HRPoint? {
+        guard let t = temperature, let l = star.luminosity else { return nil }
+        return HRPoint(temperatureK: t, luminositySolar: l)
+    }
 
     var body: some View {
         DetailScaffold(symbol: "sparkle", tint: .yellow, title: StarFacts.displayName(for: star),
@@ -301,11 +308,16 @@ private struct StarDetailView: View {
             if let hr = star.harvardRevised { DetailRow("Bright Star", "HR \(hr)") }
             if let gl = star.gliese { DetailRow("Gliese", gl) }
         } description: {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 16) {
                 if let summary { Text(summary) }
                 if let spectral {
                     Label(spectral, systemImage: "thermometer.medium")
                         .font(.subheadline).foregroundStyle(.white.opacity(0.7))
+                }
+                if let lifeStory {
+                    Label(lifeStory, systemImage: "hourglass")
+                        .font(.subheadline).foregroundStyle(.white.opacity(0.75))
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 if !facts.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
@@ -315,11 +327,40 @@ private struct StarDetailView: View {
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
-                    .padding(.top, 2)
+                }
+                if let hrHighlight, !hrPopulation.isEmpty {
+                    HRDiagramView(population: hrPopulation, highlight: hrHighlight)
+                }
+                if let r = radiusSolar {
+                    StarSizeView(starName: StarFacts.displayName(for: star),
+                                 radiusSolar: r, temperatureK: temperature)
                 }
             }
         } action: {
             if star.distanceParsecs != nil { GalaxyMapView(store: store, exo: exo, focus: .star(star.id)) }
+        }
+        .task(id: store.catalog?.count ?? 0) { buildHRPopulation() }
+    }
+
+    /// Samples the catalog into a background cloud for the HR diagram — every star
+    /// with both a luminosity and a colour-derived temperature, thinned to keep the
+    /// plot light to render.
+    private func buildHRPopulation() {
+        guard hrPopulation.isEmpty, let catalog = store.catalog else { return }
+        var points: [HRPoint] = []
+        points.reserveCapacity(1200)
+        for s in catalog.stars {
+            guard let l = s.luminosity, l > 0,
+                  let t = StarFacts.temperatureKelvin(colorIndex: s.colorIndex), t > 0 else { continue }
+            points.append(HRPoint(temperatureK: t, luminositySolar: l))
+        }
+        // Thin to ~900 evenly so the main sequence still reads but rendering stays cheap.
+        let cap = 900
+        if points.count > cap {
+            let stride = Double(points.count) / Double(cap)
+            hrPopulation = (0..<cap).map { points[Int(Double($0) * stride)] }
+        } else {
+            hrPopulation = points
         }
     }
 
