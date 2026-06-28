@@ -66,16 +66,21 @@ struct GalaxyMapView: View {
     // MARK: Rendering
 
     private func draw(in context: GraphicsContext, size: CGSize, viewProjection: simd_float4x4) {
-        // Stylized Milky Way, drawn first so real stars sit in front of it.
-        for point in backdrop {
-            guard let (p, depth) = project(point.position, viewProjection, size) else { continue }
-            if p.x < -2 || p.x > size.width + 2 || p.y < -2 || p.y > size.height + 2 { continue }
-            let perspective = min(3.0, max(0.7, Double(900 / depth)))
-            let radius = point.size * CGFloat(perspective)
-            context.fill(
-                Path(ellipseIn: CGRect(x: p.x - radius, y: p.y - radius, width: radius * 2, height: radius * 2)),
-                with: .color(point.color.opacity(point.baseOpacity))
-            )
+        // Stylized Milky Way: drawn into a blurred, additively-blended layer so the
+        // points melt into luminous arms, bar and bulge instead of reading as dots.
+        context.drawLayer { layer in
+            layer.addFilter(.blur(radius: 3.5))
+            layer.blendMode = .plusLighter
+            for point in backdrop {
+                guard let (p, depth) = project(point.position, viewProjection, size) else { continue }
+                if p.x < -6 || p.x > size.width + 6 || p.y < -6 || p.y > size.height + 6 { continue }
+                let perspective = min(3.2, max(0.8, Double(900 / depth)))
+                let radius = point.size * CGFloat(perspective)
+                layer.fill(
+                    Path(ellipseIn: CGRect(x: p.x - radius, y: p.y - radius, width: radius * 2, height: radius * 2)),
+                    with: .color(point.color.opacity(point.baseOpacity))
+                )
+            }
         }
 
         for star in stars {
@@ -333,74 +338,77 @@ struct GalaxyMapView: View {
             centre + x * axisA + y * axisB + h * up
         }
 
-        let armColor = Color(red: 0.78, green: 0.86, blue: 1.0)   // bluish young arm stars
-        let hiiColor = Color(red: 1.0, green: 0.50, blue: 0.62)   // pink star-forming knots
-        let discColor = Color(red: 0.92, green: 0.90, blue: 0.84) // diffuse disc
-        let bulgeColor = Color(red: 1.0, green: 0.85, blue: 0.55) // warm central bar/bulge
+        let armColor = Color(red: 0.72, green: 0.82, blue: 1.0)   // bluish young arm stars
+        let hiiColor = Color(red: 1.0, green: 0.48, blue: 0.60)   // pink star-forming knots
+        let discColor = Color(red: 0.60, green: 0.70, blue: 0.95) // bluish diffuse haze
+        let bulgeColor = Color(red: 1.0, green: 0.86, blue: 0.58) // warm central bar/bulge
 
         let rMax: Float = 15000
-        let rInner: Float = 1400
+        let rInner: Float = 2400   // arms emanate from the ends of the bar
         let arms = 4
-        let k: Float = 0.20   // logarithmic-spiral winding (~2 turns across the disc)
+        let k: Float = 0.22        // logarithmic-spiral winding (~1.3 turns)
 
         // Spiral angle for a given galactocentric radius.
         func spiralAngle(_ r: Float) -> Float { Float(log(Double(r / rInner))) / k }
 
         var points: [BackdropPoint] = []
 
+        // Two major arms (from the bar ends) + two minor arms, like the real galaxy.
         for armIndex in 0..<arms {
-            let offset = Float(armIndex) * (2 * .pi / Float(arms))
-            // Arm stars — sampled by radius so the arm spans the whole disc.
-            for _ in 0..<2200 {
+            let offset = Float(armIndex) * (.pi / 2)
+            let major = (armIndex % 2 == 0)
+            let starCount = major ? 2600 : 1400
+            let knotCount = major ? 140 : 70
+            let weight: Float = major ? 1.0 : 0.6
+            for _ in 0..<starCount {
                 let r = rInner + rand(0, 1) * (rMax - rInner)
-                let width = r * 0.05 + 220
-                let rr = r + gaussian() * width
+                let rr = r + gaussian() * (r * 0.05 + 220)
                 let angle = spiralAngle(r) + offset + gaussian() * 0.09
                 let h = gaussian() * (120 + r * 0.010)
-                let bright = max(0.12, 0.55 - 0.32 * (r / rMax))   // brighter toward the centre
+                let bright = max(0.07, 0.40 - 0.26 * (r / rMax)) * weight
                 points.append(BackdropPoint(
                     position: place(cos(angle) * rr, sin(angle) * rr, h),
                     baseOpacity: Double(bright) * Double(rand(0.5, 1)),
-                    size: CGFloat(rand(0.6, 1.6)),
+                    size: CGFloat(rand(0.7, 1.8)),
                     color: armColor))
             }
             // Pink HII regions studding the arms — the iconic star-forming knots.
-            for _ in 0..<110 {
-                let r = rInner + rand(0.1, 1) * (rMax - rInner)
+            for _ in 0..<knotCount {
+                let r = rInner + rand(0.05, 1) * (rMax - rInner)
                 let angle = spiralAngle(r) + offset + gaussian() * 0.05
                 let cx = cos(angle) * r, cy = sin(angle) * r
                 points.append(BackdropPoint(
                     position: place(cx + gaussian() * 170, cy + gaussian() * 170, gaussian() * 110),
-                    baseOpacity: Double(rand(0.3, 0.7)),
-                    size: CGFloat(rand(0.8, 1.9)),
+                    baseOpacity: Double(rand(0.25, 0.55)) * Double(weight),
+                    size: CGFloat(rand(0.9, 2.0)),
                     color: hiiColor))
             }
         }
 
-        // Diffuse disc, exponential falloff — fills between the arms faintly.
-        for _ in 0..<2600 {
+        // Diffuse disc, exponential falloff — fills between the arms with a faint haze.
+        for _ in 0..<3000 {
             let r = sqrt(rand(0, 1)) * rMax
             let angle = rand(0, 2 * .pi)
             let h = gaussian() * (110 + r * 0.010)
-            let bright = max(0.03, 0.15 * exp(-r / 8000))
+            let bright = max(0.02, 0.11 * exp(-r / 8000))
             points.append(BackdropPoint(
                 position: place(cos(angle) * r, sin(angle) * r, h),
                 baseOpacity: Double(bright) * Double(rand(0.4, 1)),
-                size: CGFloat(rand(0.4, 1.0)),
+                size: CGFloat(rand(0.5, 1.2)),
                 color: discColor))
         }
 
         // Central bar + bulge — warm, bright, elongated (the Milky Way is a barred spiral).
-        for _ in 0..<2400 {
-            let x = gaussian() * 2600      // elongated along axisA → the bar
+        for _ in 0..<2600 {
+            let x = gaussian() * 2700      // elongated along axisA → the bar
             let y = gaussian() * 1050
             let z = gaussian() * 650
-            let d = (x * x / (2600 * 2600) + y * y / (1050 * 1050) + z * z / (650 * 650)).squareRoot()
-            let opacity = min(0.9, max(0.12, 0.9 - Double(d) * 0.78))
+            let d = (x * x / (2700 * 2700) + y * y / (1050 * 1050) + z * z / (650 * 650)).squareRoot()
+            let opacity = min(0.8, max(0.1, 0.8 - Double(d) * 0.66))
             points.append(BackdropPoint(
                 position: place(x, y, z),
                 baseOpacity: opacity * Double(rand(0.6, 1)),
-                size: CGFloat(rand(0.7, 1.7)),
+                size: CGFloat(rand(0.8, 1.9)),
                 color: bulgeColor))
         }
 
