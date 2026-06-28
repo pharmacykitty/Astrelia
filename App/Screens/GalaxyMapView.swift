@@ -23,6 +23,14 @@ struct GalaxyMapView: View {
 
     @State private var dragPrevious: CGSize = .zero
     @State private var zoomAnchor: Float = 220
+
+    // Free-fly camera: a free eye position + look direction, moved by a throttle.
+    @State private var flyMode = false
+    @State private var eye = SIMD3<Float>(0, 0, 0)
+    @State private var throttle: Float = 0
+    @State private var flyTask: Task<Void, Never>?
+    private let flySpeed: Float = 2200   // parsecs/second at full throttle
+
     @State private var selection: MapSelection?
 
     /// What the user has tapped — a real star or a curated landmark.
@@ -63,7 +71,7 @@ struct GalaxyMapView: View {
         .ignoresSafeArea()
         .toolbar(.hidden, for: .navigationBar)
         .task(id: store.catalog?.count ?? 0) { buildStars(); buildBackdrop() }
-        .onDisappear { flightTask?.cancel() }
+        .onDisappear { flightTask?.cancel(); flyTask?.cancel() }
     }
 
     /// Device safe-area insets, read directly since the map ignores the safe area
@@ -153,48 +161,61 @@ struct GalaxyMapView: View {
     }
 
     private func overlay(size: CGSize, viewProjection: simd_float4x4) -> some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Button { dismiss() } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.subheadline.weight(.bold)).foregroundStyle(.white)
-                        .frame(width: 36, height: 36)
-                        .background(.ultraThinMaterial, in: Circle())
+        ZStack {
+            VStack(spacing: 0) {
+                HStack(spacing: 8) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.subheadline.weight(.bold)).foregroundStyle(.white)
+                            .frame(width: 36, height: 36)
+                            .background(.ultraThinMaterial, in: Circle())
+                    }
+                    Text("\(stars.count) stars")
+                        .font(.caption.monospacedDigit()).foregroundStyle(.white.opacity(0.6))
+                    Spacer()
+                    Button { exitFlyMode(); animateCamera(to: .zero, distance: 220) } label: {
+                        Image(systemName: "sun.max.fill").frame(width: 30, height: 24)
+                    }
+                    .buttonStyle(.bordered).tint(.white)
+                    Button { exitFlyMode(); flyToGalaxy() } label: {
+                        Image(systemName: "hurricane").frame(width: 30, height: 24)
+                    }
+                    .buttonStyle(.bordered).tint(.white)
+                    Button { flyMode ? exitFlyMode() : enterFlyMode() } label: {
+                        Image(systemName: flyMode ? "airplane.circle.fill" : "airplane").frame(width: 30, height: 24)
+                    }
+                    .buttonStyle(.bordered).tint(flyMode ? .green : .white)
                 }
-                Text("\(stars.count) stars")
-                    .font(.caption.monospacedDigit()).foregroundStyle(.white.opacity(0.6))
+                .padding(.horizontal)
+                .padding(.top, safeInsets.top + 4)
+
                 Spacer()
-                Button { animateCamera(to: .zero, distance: 220) } label: {
-                    Label("Sol", systemImage: "sun.max.fill").font(.caption)
+
+                if let selection {
+                    selectionCard(selection)
+                } else {
+                    Text(flyMode ? "Drag to aim · use the throttle to fly"
+                                 : "Drag to orbit · pinch to zoom · tap a star or landmark")
+                        .font(.caption).foregroundStyle(.white.opacity(0.45))
+                        .multilineTextAlignment(.center).padding(.horizontal)
                 }
-                .buttonStyle(.bordered).tint(.white)
-                Button { flyToGalaxy() } label: {
-                    Label("Galaxy", systemImage: "hurricane").font(.caption)
-                }
-                .buttonStyle(.bordered).tint(.white)
             }
-            .padding(.horizontal)
-            .padding(.top, safeInsets.top + 4)
+            .padding(.bottom, safeInsets.bottom + 10)
 
-            Spacer()
-
-            if let selection {
-                selectionCard(selection)
-            } else {
-                Text("Drag to orbit · pinch to zoom · tap a star or landmark")
-                    .font(.caption).foregroundStyle(.white.opacity(0.45))
+            if flyMode {
+                HStack {
+                    Spacer()
+                    ThrottleControl(throttle: $throttle).padding(.trailing, 14)
+                }
             }
         }
-        .padding(.bottom, safeInsets.bottom + 10)
     }
 
     @ViewBuilder
     private func selectionCard(_ selection: MapSelection) -> some View {
         switch selection {
         case .star(let star): card(title: star.name, tint: .white, detail: starDetail(star), body: nil) { flyTo(star) }
-        case .landmark(let lm): card(title: lm.name, tint: lm.type.color, detail: landmarkDetail(lm), body: lm.summary) {
-            animateCamera(to: lm.positionParsecs, distance: lm.suggestedViewDistance)
-        }
+        case .landmark(let lm): card(title: lm.name, tint: lm.type.color, detail: landmarkDetail(lm), body: lm.summary) { flyTo(lm) }
         }
     }
 
@@ -240,12 +261,52 @@ struct GalaxyMapView: View {
 
     // MARK: Camera
 
+    private var lookDirection: SIMD3<Float> {
+        SIMD3(cos(pitch) * sin(yaw), sin(pitch), cos(pitch) * cos(yaw))
+    }
+
     private func makeViewProjection(aspect: Float) -> simd_float4x4 {
-        let direction = SIMD3<Float>(cos(pitch) * sin(yaw), sin(pitch), cos(pitch) * cos(yaw))
-        let eye = target + distance * direction
-        let view = lookAt(eye: eye, center: target, up: SIMD3(0, 1, 0))
+        let dir = lookDirection
+        let cameraEye: SIMD3<Float>
+        let center: SIMD3<Float>
+        if flyMode {
+            cameraEye = eye
+            center = eye - dir          // forward is -dir, matching orbit's look
+        } else {
+            cameraEye = target + distance * dir
+            center = target
+        }
+        let view = lookAt(eye: cameraEye, center: center, up: SIMD3(0, 1, 0))
         let projection = perspective(fovy: fieldOfView, aspect: aspect, near: 0.05, far: 200000)
         return projection * view
+    }
+
+    // MARK: Free-fly
+
+    private func enterFlyMode() {
+        eye = target + distance * lookDirection   // start where the orbit camera was
+        flyMode = true
+        flyTask?.cancel()
+        flyTask = Task { @MainActor in
+            var last = Date()
+            while !Task.isCancelled {
+                let now = Date()
+                let dt = Float(min(0.05, now.timeIntervalSince(last)))
+                last = now
+                if throttle != 0 {
+                    eye += (-lookDirection) * (throttle * flySpeed * dt)
+                }
+                try? await Task.sleep(for: .milliseconds(16))
+            }
+        }
+    }
+
+    private func exitFlyMode() {
+        guard flyMode else { return }
+        target = eye - lookDirection * distance   // resume orbit around a point ahead
+        flyMode = false
+        throttle = 0
+        flyTask?.cancel()
     }
 
     private func project(_ position: SIMD3<Float>, _ viewProjection: simd_float4x4, _ size: CGSize) -> (CGPoint, Float)? {
@@ -258,7 +319,13 @@ struct GalaxyMapView: View {
     }
 
     private func flyTo(_ star: GalaxyStar) {
+        exitFlyMode()
         animateCamera(to: star.position, distance: 40)
+    }
+
+    private func flyTo(_ landmark: Landmark) {
+        exitFlyMode()
+        animateCamera(to: landmark.positionParsecs, distance: landmark.suggestedViewDistance)
     }
 
     /// Flies the camera out to a face-on view of the whole galaxy, centred on Sgr A*.
@@ -501,6 +568,46 @@ private struct GalaxyStar: Identifiable {
     let distanceParsecs: Double
     let name: String
     let constellation: String?
+}
+
+/// A spring-centred vertical throttle for free-fly: drag up to fly forward, down
+/// to reverse; releases back to zero. Bound value is -1…1.
+private struct ThrottleControl: View {
+    @Binding var throttle: Float
+    private let height: CGFloat = 200
+    private let knob: CGFloat = 34
+
+    var body: some View {
+        let travel = height / 2 - knob / 2
+        ZStack {
+            Capsule().fill(.ultraThinMaterial)
+            Capsule().strokeBorder(.white.opacity(0.15), lineWidth: 0.5)
+            VStack {
+                Image(systemName: "chevron.up").font(.caption2)
+                Spacer()
+                Image(systemName: "chevron.down").font(.caption2)
+            }
+            .foregroundStyle(.white.opacity(0.4)).padding(.vertical, 8)
+            Rectangle().fill(.white.opacity(0.2)).frame(height: 1)   // zero mark
+
+            Circle()
+                .fill(throttle == 0 ? Color.white : Color.green)
+                .frame(width: knob, height: knob)
+                .overlay(Image(systemName: "paperplane.fill").font(.caption2).foregroundStyle(.black.opacity(0.7)))
+                .offset(y: -CGFloat(throttle) * travel)
+                .shadow(radius: 3)
+        }
+        .frame(width: 46, height: height)
+        .contentShape(Rectangle())
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { value in
+                    let center = height / 2
+                    throttle = max(-1, min(1, Float((center - value.location.y) / travel)))
+                }
+                .onEnded { _ in withAnimation(.spring(duration: 0.3)) { throttle = 0 } }
+        )
+    }
 }
 
 /// A faint, non-interactive point making up the stylized Milky Way backdrop.
