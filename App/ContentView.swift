@@ -32,6 +32,14 @@ struct ContentView: View {
     @State private var zoomAnchor = 65.0
     @State private var selection: StarSelection?
 
+    // Time scrubber: an offset (seconds) from "now" applied to every position
+    // calculation, so you can run the sky forward/back to watch the Moon's phase,
+    // planets, and rising/setting. Off (live) by default — zero offset.
+    @State private var timeOffset: TimeInterval = 0
+    @State private var showTimeScrubber = false
+    private var isTimeShifted: Bool { abs(timeOffset) > 1 }
+    private func shifted(_ date: Date) -> Date { date.addingTimeInterval(timeOffset) }
+
     // AR calibration (azimuth offset, degrees) supplying absolute heading.
     // Until the user manually aligns, it's auto-seeded from the compass (CoreMotion);
     // a manual Align freezes a precise value.
@@ -74,7 +82,7 @@ struct ContentView: View {
                         if let camera {
                             skyCanvas(camera: camera, effectiveFOV: effectiveFOV, size: size)
                             if filters.showSunMoon,
-                               let state = solarState(camera: camera, size: size, date: timeline.date) {
+                               let state = solarState(camera: camera, size: size, date: shifted(timeline.date)) {
                                 bodyNodes(state)
                             }
                         }
@@ -311,6 +319,7 @@ struct ContentView: View {
         return VStack(spacing: 12) {
             controlBar
             if let selection { selectionCard(selection) }
+            if showTimeScrubber { timeScrubber() }
             if mode == .ar { calibrationBar() }
 
             Spacer(minLength: 0)
@@ -320,7 +329,7 @@ struct ContentView: View {
             // Live readout, refreshed calmly (kept out of the 60fps render loop).
             TimelineView(.periodic(from: .now, by: 0.25)) { _ in
                 let camera = makeSkyCamera(size: size)
-                bottomPanel(camera.flatMap { solarState(camera: $0, size: size, date: Date()) })
+                bottomPanel(camera.flatMap { solarState(camera: $0, size: size, date: shifted(Date())) })
             }
         }
         .padding(.horizontal)
@@ -347,9 +356,49 @@ struct ContentView: View {
             .frame(width: 132)
             .sensoryFeedback(.selection, trigger: mode)
             Spacer()
+            CircleIconButton(label: "Time travel", systemImage: isTimeShifted ? "clock.arrow.2.circlepath" : "clock",
+                             tint: .cyan, isActive: showTimeScrubber || isTimeShifted) {
+                withAnimation { showTimeScrubber.toggle() }
+            }
             CircleIconButton(label: "Sky filters", systemImage: "slider.horizontal.3") { showFilters = true }
         }
     }
+
+    @ViewBuilder
+    private func timeScrubber() -> some View {
+        VStack(spacing: 6) {
+            HStack {
+                Label(timeOffsetLabel, systemImage: "clock")
+                    .font(.caption.monospacedDigit()).foregroundStyle(.white)
+                Spacer()
+                if isTimeShifted {
+                    Button("Now") { withAnimation { timeOffset = 0 }; refreshSky() }
+                        .font(.caption.weight(.semibold)).foregroundStyle(Theme.accent)
+                }
+            }
+            Slider(value: $timeOffset, in: -12 * 3600 ... 12 * 3600, step: 300) { editing in
+                if !editing { refreshSky() }   // rebuild the star field on release
+            }
+            .tint(.cyan)
+        }
+        .padding(10)
+        .luminousSurface(.cyan, cornerRadius: 22, glow: 8)
+    }
+
+    /// "Live · Sat 21:14" when at the present instant, otherwise the shifted clock
+    /// time and the signed offset, e.g. "Sat 03:14 · +6h 0m".
+    private var timeOffsetLabel: String {
+        let date = shifted(Date())
+        let clock = Self.scrubberFormatter.string(from: date)
+        if !isTimeShifted { return "Live · \(clock)" }
+        let total = Int(abs(timeOffset) / 60)
+        let sign = timeOffset >= 0 ? "+" : "−"
+        return "\(clock) · \(sign)\(total / 60)h \(total % 60)m"
+    }
+
+    private static let scrubberFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "EEE HH:mm"; return f
+    }()
 
     /// Which screen edge is physically up: 0 top (portrait), 1 left, 2 bottom
     /// (upside down), 3 right. Derived from the snapped chrome rotation.
@@ -540,7 +589,7 @@ struct ContentView: View {
             return
         }
         let location = GeographicLocation(latitude: .degrees(latitude), longitude: .degrees(longitude))
-        let jd = JulianDay(Date())
+        let jd = JulianDay(shifted(Date()))
 
         func toWorld(raDegrees: Double, decDegrees: Double) -> SIMD3<Double> {
             let horizon = CoordinateTransform.horizontal(
