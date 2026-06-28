@@ -22,4 +22,28 @@ public enum SiderealTime {
     public static func localMean(at jd: JulianDay, longitude: Angle) -> Angle {
         (greenwichMean(at: jd) + longitude).normalized
     }
+
+    // MARK: Apparent sidereal time (nutation correction)
+
+    /// The equation of the equinoxes — the small correction that converts *mean*
+    /// into *apparent* sidereal time (Meeus, ch. 12): Δψ · cos ε, where Δψ is the
+    /// nutation in longitude and ε the true obliquity. Returned as an `Angle`
+    /// (typically only a second or so of time, i.e. tens of arcseconds).
+    public static func equationOfEquinoxes(at jd: JulianDay) -> Angle {
+        let deltaPsi = Nutation.longitude(at: jd)
+        let epsilon = Earth.trueObliquity(at: jd)
+        return Angle(radians: deltaPsi.radians * epsilon.cosine)
+    }
+
+    /// Greenwich Apparent Sidereal Time = GMST + equation of the equinoxes,
+    /// as an angle in [0°, 360°).
+    public static func greenwichApparent(at jd: JulianDay) -> Angle {
+        (greenwichMean(at: jd) + equationOfEquinoxes(at: jd)).normalized
+    }
+
+    /// Local Apparent Sidereal Time for an observer at `longitude` (east-positive),
+    /// as an angle in [0°, 360°).
+    public static func localApparent(at jd: JulianDay, longitude: Angle) -> Angle {
+        (greenwichApparent(at: jd) + longitude).normalized
+    }
 }
