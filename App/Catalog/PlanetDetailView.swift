@@ -106,6 +106,7 @@ struct PlanetDetailView: View {
     private func row(_ label: String, _ value: String) -> some View {
         HStack {
             Text(label).foregroundStyle(.white.opacity(0.6))
+            GlossaryButton(label: label)
             Spacer()
             Text(value).foregroundStyle(.white).multilineTextAlignment(.trailing)
         }

@@ -11,6 +11,7 @@ struct AboutView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 26) {
                     header
+                    glossaryLink
                     ForEach(SourceCatalog.groups) { group in
                         sourceGroup(group)
                     }
@@ -36,6 +37,25 @@ struct AboutView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 12)
+    }
+
+    private var glossaryLink: some View {
+        NavigationLink { GlossaryView() } label: {
+            HStack(spacing: 14) {
+                LuminousGlyph(symbol: "character.book.closed.fill", tint: Theme.accent, size: 46, glyphSize: 20)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Glossary").font(.headline).foregroundStyle(.white)
+                    Text("Plain-language definitions of the terms used throughout")
+                        .font(.caption).foregroundStyle(.white.opacity(0.55))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+                Image(systemName: "chevron.right").font(.footnote.weight(.semibold))
+                    .foregroundStyle(Theme.accent.opacity(0.6))
+            }
+            .padding(14).luminousSurface(Theme.accent)
+        }
+        .buttonStyle(.plain)
     }
 
     private func sourceGroup(_ group: SourceGroup) -> some View {
