@@ -148,6 +148,33 @@ struct StarSizeView: View {
     }
 }
 
+// MARK: - Colour key
+
+/// A compact legend explaining that a star's colour encodes its temperature —
+/// blue is hot, red is cool. Makes the sky's colour coding legible at a glance for
+/// anyone who doesn't already know the convention.
+struct StarColorLegend: View {
+    var body: some View {
+        let stops: [Color] = [12_000, 8_000, 6_000, 5_000, 4_000, 3_000]
+            .map { TemperatureColor.color(forKelvin: $0) }
+        VStack(spacing: 4) {
+            LinearGradient(colors: stops, startPoint: .leading, endPoint: .trailing)
+                .frame(height: 7)
+                .clipShape(Capsule())
+            HStack {
+                Text("hotter").foregroundStyle(.white.opacity(0.75))
+                Spacer()
+                Text("star colour ≈ temperature").foregroundStyle(.white.opacity(0.5))
+                Spacer()
+                Text("cooler").foregroundStyle(.white.opacity(0.75))
+            }
+            .font(.caption2)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 9)
+        .background(.black.opacity(0.35), in: RoundedRectangle(cornerRadius: 14))
+    }
+}
+
 // MARK: - Temperature → colour
 
 /// Maps a stellar effective temperature to an approximate display colour along the

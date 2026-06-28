@@ -9,6 +9,7 @@ struct SkyFilters: Equatable {
     var showConstellations = true     // stick-figure lines
     var showSunMoon = true
     var showBelowHorizon = true       // keep showing things beneath the horizon
+    var showColourKey = false         // legend: star colour ≈ temperature
 }
 
 /// A tidy settings sheet for the sky filters.
@@ -39,6 +40,9 @@ struct FilterSheet: View {
                     .disabled(!filters.showStars)
 
                     Toggle("Star labels", isOn: $filters.showLabels)
+                        .disabled(!filters.showStars)
+
+                    Toggle("Colour key (temperature)", isOn: $filters.showColourKey)
                         .disabled(!filters.showStars)
                 } header: {
                     Text("Stars")

@@ -315,6 +315,8 @@ struct ContentView: View {
 
             Spacer(minLength: 0)
 
+            if filters.showStars && filters.showColourKey { StarColorLegend() }
+
             // Live readout, refreshed calmly (kept out of the 60fps render loop).
             TimelineView(.periodic(from: .now, by: 0.25)) { _ in
                 let camera = makeSkyCamera(size: size)
@@ -370,6 +372,10 @@ struct ContentView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(selection.title).font(.headline).foregroundStyle(.white)
                 Text(selection.subtitle).font(.caption).foregroundStyle(.white.opacity(0.6))
+                if let detail = selection.detail {
+                    Text(detail).font(.caption2).foregroundStyle(.white.opacity(0.5))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             Spacer()
             Button { self.selection = nil } label: {
@@ -766,12 +772,20 @@ private struct CalibrationOption: Identifiable {
 private struct StarSelection {
     let title: String
     let subtitle: String
+    let detail: String?
 
     init(star: Star) {
         title = star.properName ?? star.bayerFlamsteed ?? star.hipparcos.map { "HIP \($0)" } ?? "Star \(star.id)"
         var parts = [String(format: "mag %.1f", star.apparentMagnitude)]
-        if let constellation = star.constellation { parts.append(constellation) }
+        if let constellation = StarFacts.constellationName(star.constellation) ?? star.constellation {
+            parts.append(constellation)
+        }
+        if let pc = star.distanceParsecs, pc > 0 {
+            parts.append(String(format: "%.0f ly away", pc * Astrophysics.lightYearsPerParsec))
+        }
         subtitle = parts.joined(separator: " · ")
+        // A second line: the plain-language spectral kind, if we can read it.
+        detail = StarFacts.spectralDescription(star.spectralType)
     }
 }
 
