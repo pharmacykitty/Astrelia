@@ -36,6 +36,19 @@ public enum Astrophysics {
         lightYears(fromParsecs: parsecs)
     }
 
+    // MARK: Planet comparisons
+
+    /// Surface gravity relative to Earth's, from a planet's mass and radius (both in
+    /// Earth units): g/g⊕ = (M/M⊕) / (R/R⊕)². The relatable "you'd weigh this much"
+    /// figure. `nil` for non-positive inputs.
+    public static func surfaceGravityEarths(massEarth: Double, radiusEarth: Double) -> Double? {
+        guard massEarth > 0, radiusEarth > 0 else { return nil }
+        return massEarth / (radiusEarth * radiusEarth)
+    }
+
+    /// Kelvin → degrees Celsius.
+    public static func celsius(fromKelvin kelvin: Double) -> Double { kelvin - 273.15 }
+
     // MARK: Derived radius (Stefan–Boltzmann)
 
     /// A star's radius in solar radii, derived from its luminosity (in solar

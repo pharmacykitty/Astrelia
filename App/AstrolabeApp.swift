@@ -13,6 +13,16 @@ struct AstrolabeApp: App {
             } else if ProcessInfo.processInfo.arguments.contains("-snapshotStar") {
                 NavigationStack { StarSnapshotHarness() }
                     .preferredColorScheme(.dark)
+            } else if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-snapshotPlanet") {
+                let args = ProcessInfo.processInfo.arguments
+                let name = (i + 1 < args.count && !args[i + 1].hasPrefix("-")) ? args[i + 1] : "Earth"
+                PlanetSnapshotHarness(planetName: name)
+                    .preferredColorScheme(.dark)
+            } else if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-snapshotAstro") {
+                let args = ProcessInfo.processInfo.arguments
+                let screen = (i + 1 < args.count) ? args[i + 1] : "detail"
+                AstrologySnapshotHarness(screen: screen)
+                    .preferredColorScheme(.dark)
             } else {
                 ContentView()
             }

@@ -10,6 +10,7 @@ struct SystemView: View {
 
     @State private var animate = true
     @State private var selected: Exoplanet?
+    @State private var detail: Exoplanet?
 
     // Animation clock that starts at 0 and only advances while playing. Starting
     // near zero keeps sin/cos arguments small (feeding the raw ~7.7e8 s reference
@@ -55,6 +56,7 @@ struct SystemView: View {
         .ignoresSafeArea()
         .toolbar(.hidden, for: .navigationBar)
         .task { if reduceMotion { animate = false } }   // don't auto-spin orbits
+        .sheet(item: $detail) { PlanetDetailView(planet: $0, system: system) }
     }
 
     // MARK: Geometry
@@ -306,6 +308,12 @@ struct SystemView: View {
                 Text("\(method)\(planet.year.map { ", \($0)" } ?? "")")
                     .font(.caption2).foregroundStyle(.white.opacity(0.5))
             }
+            Button { detail = planet } label: {
+                Label("Full details", systemImage: "info.circle")
+                    .font(.subheadline).frame(maxWidth: .infinity)
+            }
+            .buttonStyle(LuminousButtonStyle(tint: planetColor(planet)))
+            .padding(.top, 4)
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
