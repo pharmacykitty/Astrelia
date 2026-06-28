@@ -37,7 +37,7 @@ struct GalaxyMapView: View {
     @State private var eye = SIMD3<Float>(0, 0, 0)
     @State private var throttle: Float = 0
     @State private var flyTask: Task<Void, Never>?
-    private let flySpeed: Float = 2200   // parsecs/second at full throttle
+    private let flySpeed: Float = 1540   // parsecs/second at full throttle
 
     @State private var selection: MapSelection?
 
@@ -97,11 +97,38 @@ struct GalaxyMapView: View {
     // MARK: Rendering
 
     private func draw(in context: GraphicsContext, size: CGSize, viewProjection: simd_float4x4) {
+        let focal = Double(1 / tan(fieldOfView / 2))
+        let halfH = Double(size.height) * 0.5
+        let maxDim = Double(max(size.width, size.height))
+
+        // Broad galactic glow: a soft continuous haze around the disc/core so the
+        // Milky Way reads as luminous structure, not just discrete points. Cheap
+        // (a couple of radial gradients), drawn under the point field.
+        if let (cp, cdepth) = project(Galactic.centerPosition, viewProjection, size), cdepth > 0 {
+            let pxPerPc = halfH * focal / Double(cdepth)
+            let discR = CGFloat(min(maxDim * 1.8, 15000 * pxPerPc))
+            let coreR = CGFloat(min(maxDim, 3200 * pxPerPc))
+            func rect(_ rad: CGFloat) -> CGRect { CGRect(x: cp.x - rad, y: cp.y - rad, width: rad * 2, height: rad * 2) }
+            context.drawLayer { layer in
+                layer.blendMode = .plusLighter
+                if discR > 6 {
+                    layer.fill(Path(ellipseIn: rect(discR)),
+                               with: .radialGradient(Gradient(colors: [Color(red: 0.45, green: 0.55, blue: 0.85).opacity(0.12), .clear]),
+                                                     center: cp, startRadius: 0, endRadius: discR))
+                }
+                if coreR > 4 {
+                    layer.fill(Path(ellipseIn: rect(coreR)),
+                               with: .radialGradient(Gradient(colors: [Color(red: 1.0, green: 0.9, blue: 0.7).opacity(0.35), .clear]),
+                                                     center: cp, startRadius: 0, endRadius: coreR))
+                }
+            }
+        }
+
         // Stylized Milky Way: batched into a blurred, additive layer. Points are
         // grouped by colour and a coarse opacity level, so we issue ~16 fills
         // instead of thousands. Off-screen and sub-pixel points are culled.
         context.drawLayer { layer in
-            layer.addFilter(.blur(radius: 2.5))
+            layer.addFilter(.blur(radius: 3.0))
             layer.blendMode = .plusLighter
             var paths = Array(repeating: Array(repeating: Path(), count: backdropOpacityLevels.count),
                               count: backdropPalette.count)
@@ -154,29 +181,34 @@ struct GalaxyMapView: View {
                          at: CGPoint(x: sunPoint.x, y: sunPoint.y + 14))
         }
 
-        // Deep-sky landmarks — nebulae, clusters, black holes, satellite galaxies.
+        // Deep-sky landmarks — rendered at true physical scale: distant ones are
+        // small markers, but they grow into glowing clouds / star clusters as you
+        // approach, sized by their real radius. Plus a de-cluttered label.
         var labelRects: [CGRect] = []
         for landmark in Landmarks.all {
             guard let (p, depth) = project(landmark.positionParsecs, viewProjection, size), depth > 0 else { continue }
-            if p.x < -24 || p.x > size.width + 24 || p.y < -24 || p.y > size.height + 24 { continue }
-            let color = landmark.type.color
-            let big = landmark.type == .blackHole || landmark.type == .galaxy
-            let outer: CGFloat = big ? 13 : 9
-            context.fill(Path(ellipseIn: CGRect(x: p.x - outer, y: p.y - outer, width: outer * 2, height: outer * 2)),
-                         with: .color(color.opacity(0.13)))
-            context.fill(Path(ellipseIn: CGRect(x: p.x - 4.5, y: p.y - 4.5, width: 9, height: 9)),
-                         with: .color(color.opacity(0.45)))
-            context.fill(Path(ellipseIn: CGRect(x: p.x - 1.8, y: p.y - 1.8, width: 3.6, height: 3.6)),
-                         with: .color(.white.opacity(0.95)))
+            let screenRadius = landmark.radiusParsecs * (Double(size.height) * 0.5) * focal / Double(depth)
+            let r = CGFloat(max(2.0, min(screenRadius, Double(max(size.width, size.height)) * 1.5)))
+            if p.x < -r - 30 || p.x > size.width + r + 30 || p.y < -r - 30 || p.y > size.height + r + 30 { continue }
 
-            let text = Text(landmark.name).font(.system(size: 9, weight: .medium)).foregroundStyle(color.opacity(0.95))
+            if r >= 4 {
+                drawLandmark(context, landmark, at: p, radius: r)
+            } else {
+                let color = landmark.type.color
+                context.fill(Path(ellipseIn: CGRect(x: p.x - 8, y: p.y - 8, width: 16, height: 16)), with: .color(color.opacity(0.13)))
+                context.fill(Path(ellipseIn: CGRect(x: p.x - 4, y: p.y - 4, width: 8, height: 8)), with: .color(color.opacity(0.45)))
+                context.fill(Path(ellipseIn: CGRect(x: p.x - 1.6, y: p.y - 1.6, width: 3.2, height: 3.2)), with: .color(.white.opacity(0.95)))
+            }
+
+            let labelY = p.y + CGFloat(min(Double(r) + 8, 70))
+            let text = Text(landmark.name).font(.system(size: 9, weight: .medium)).foregroundStyle(landmark.type.color.opacity(0.95))
             let resolved = context.resolve(text)
             let m = resolved.measure(in: CGSize(width: 160, height: 40))
-            let rect = CGRect(x: p.x - m.width / 2, y: p.y + 11 - m.height / 2, width: m.width, height: m.height)
+            let rect = CGRect(x: p.x - m.width / 2, y: labelY - m.height / 2, width: m.width, height: m.height)
             if rect.minX > 2, rect.maxX < size.width - 2, rect.minY > 2, rect.maxY < size.height - 2,
                !labelRects.contains(where: { $0.intersects(rect) }) {
                 labelRects.append(rect.insetBy(dx: -3, dy: -3))
-                context.draw(resolved, at: CGPoint(x: p.x, y: p.y + 11))
+                context.draw(resolved, at: CGPoint(x: p.x, y: labelY))
             }
         }
 
@@ -187,31 +219,109 @@ struct GalaxyMapView: View {
         }
     }
 
+    /// Draws a landmark at true scale: a glowing nebula cloud, star cluster, galaxy
+    /// haze, or black-hole glow, sized to its projected physical radius.
+    private func drawLandmark(_ context: GraphicsContext, _ landmark: Landmark, at p: CGPoint, radius r: CGFloat) {
+        let color = landmark.type.color
+        func rect(_ c: CGPoint, _ rad: CGFloat) -> CGRect { CGRect(x: c.x - rad, y: c.y - rad, width: rad * 2, height: rad * 2) }
+        // Stable per-object seed (String.hashValue is randomised per launch, so don't use it).
+        var rng = SeededGenerator(seed: landmark.id.unicodeScalars.reduce(UInt64(1469598103)) { $0 &* 31 &+ UInt64($1.value) })
+        func rnd(_ a: Double, _ b: Double) -> Double { Double.random(in: a...b, using: &rng) }
+        func gauss() -> Double {
+            let u1 = Double.random(in: 1e-6...1, using: &rng), u2 = Double.random(in: 0...1, using: &rng)
+            return (-2 * log(u1)).squareRoot() * cos(2 * .pi * u2)
+        }
+
+        switch landmark.type {
+        case .emissionNebula, .supernovaRemnant, .planetaryNebula:
+            context.drawLayer { layer in
+                layer.blendMode = .plusLighter
+                layer.fill(Path(ellipseIn: rect(p, r)),
+                           with: .radialGradient(Gradient(colors: [color.opacity(0.40), color.opacity(0.0)]),
+                                                 center: p, startRadius: 0, endRadius: r))
+                if landmark.type == .planetaryNebula {
+                    layer.stroke(Path(ellipseIn: rect(p, r * 0.55)), with: .color(color.opacity(0.6)),
+                                 lineWidth: max(1.5, r * 0.18))
+                    layer.fill(Path(ellipseIn: rect(p, max(1.5, r * 0.08))), with: .color(.white))
+                } else {
+                    let knots = Int(min(14, max(4, r / 12)))
+                    for _ in 0..<knots {
+                        let ang = rnd(0, 2 * .pi), rad = rnd(0, Double(r) * 0.65)
+                        let kp = CGPoint(x: p.x + CGFloat(cos(ang) * rad), y: p.y + CGFloat(sin(ang) * rad))
+                        let kr = r * CGFloat(rnd(0.06, 0.20))
+                        let kc = landmark.type == .supernovaRemnant ? color : Color(red: 1.0, green: 0.62, blue: 0.72)
+                        layer.fill(Path(ellipseIn: rect(kp, kr)),
+                                   with: .radialGradient(Gradient(colors: [kc.opacity(0.55), .clear]),
+                                                         center: kp, startRadius: 0, endRadius: kr))
+                    }
+                    layer.fill(Path(ellipseIn: rect(p, max(1.2, r * 0.04))), with: .color(.white.opacity(0.7)))
+                }
+            }
+
+        case .openCluster, .globularCluster:
+            let globular = landmark.type == .globularCluster
+            context.drawLayer { layer in
+                layer.blendMode = .plusLighter
+                if globular {
+                    layer.fill(Path(ellipseIn: rect(p, r * 0.6)),
+                               with: .radialGradient(Gradient(colors: [color.opacity(0.35), .clear]),
+                                                     center: p, startRadius: 0, endRadius: r * 0.6))
+                }
+                let n = globular ? 160 : 50
+                for _ in 0..<n {
+                    let rad: Double = globular ? abs(gauss()) * Double(r) * 0.42 : rnd(0, Double(r))
+                    let ang = rnd(0, 2 * .pi)
+                    let sp = CGPoint(x: p.x + CGFloat(cos(ang) * rad), y: p.y + CGFloat(sin(ang) * rad))
+                    let dr = CGFloat(rnd(0.6, 1.7))
+                    layer.fill(Path(ellipseIn: rect(sp, dr)), with: .color(.white.opacity(0.9)))
+                }
+            }
+
+        case .galaxy:
+            context.drawLayer { layer in
+                layer.blendMode = .plusLighter
+                let rx = r, ry = r * 0.6
+                layer.fill(Path(ellipseIn: CGRect(x: p.x - rx, y: p.y - ry, width: rx * 2, height: ry * 2)),
+                           with: .radialGradient(Gradient(colors: [color.opacity(0.32), .clear]),
+                                                 center: p, startRadius: 0, endRadius: r))
+                for _ in 0..<90 {
+                    let ang = rnd(0, 2 * .pi), rad = rnd(0, 1)
+                    let sp = CGPoint(x: p.x + CGFloat(cos(ang) * rad * Double(rx)), y: p.y + CGFloat(sin(ang) * rad * Double(ry)))
+                    layer.fill(Path(ellipseIn: rect(sp, CGFloat(rnd(0.5, 1.4)))), with: .color(.white.opacity(0.7)))
+                }
+            }
+
+        case .blackHole:
+            let radius = max(6, min(r, 46))
+            context.drawLayer { layer in
+                layer.blendMode = .plusLighter
+                layer.fill(Path(ellipseIn: rect(p, radius)),
+                           with: .radialGradient(Gradient(colors: [color.opacity(0.55), .clear]),
+                                                 center: p, startRadius: radius * 0.18, endRadius: radius))
+                layer.fill(Path(ellipseIn: rect(p, max(2, radius * 0.14))), with: .color(.white))
+            }
+        }
+    }
+
     private func overlay(size: CGSize, viewProjection: simd_float4x4) -> some View {
         ZStack {
             VStack(spacing: 0) {
                 HStack(spacing: 8) {
-                    Button { dismiss() } label: {
-                        Image(systemName: "chevron.left")
-                            .font(.subheadline.weight(.bold)).foregroundStyle(.white)
-                            .frame(width: 36, height: 36)
-                            .background(.ultraThinMaterial, in: Circle())
-                    }
+                    CircleIconButton(label: "Back", systemImage: "chevron.left") { dismiss() }
                     Text("\(stars.count) stars")
                         .font(.caption.monospacedDigit()).foregroundStyle(.white.opacity(0.6))
                     Spacer()
-                    Button { exitFlyMode(); animateCamera(to: .zero, distance: 220) } label: {
-                        Image(systemName: "sun.max.fill").frame(width: 30, height: 24)
+                    CircleIconButton(label: "Centre on the Sun", systemImage: "sun.max.fill") {
+                        exitFlyMode(); animateCamera(to: .zero, distance: 220)
                     }
-                    .buttonStyle(.bordered).tint(.white)
-                    Button { exitFlyMode(); flyToGalaxy() } label: {
-                        Image(systemName: "hurricane").frame(width: 30, height: 24)
+                    CircleIconButton(label: "Galaxy overview", systemImage: "hurricane") {
+                        exitFlyMode(); flyToGalaxy()
                     }
-                    .buttonStyle(.bordered).tint(.white)
-                    Button { flyMode ? exitFlyMode() : enterFlyMode() } label: {
-                        Image(systemName: flyMode ? "airplane.circle.fill" : "airplane").frame(width: 30, height: 24)
+                    CircleIconButton(label: flyMode ? "Exit free flight" : "Free flight",
+                                     systemImage: flyMode ? "airplane.circle.fill" : "airplane",
+                                     tint: .green, isActive: flyMode) {
+                        flyMode ? exitFlyMode() : enterFlyMode()
                     }
-                    .buttonStyle(.bordered).tint(flyMode ? .green : .white)
                 }
                 .padding(.horizontal)
                 .padding(.top, safeInsets.top + 4)
@@ -267,9 +377,17 @@ struct GalaxyMapView: View {
             HStack {
                 Text(title).font(.title3.weight(.semibold)).foregroundStyle(.white)
                 Spacer()
-                Button { selection = nil } label: { Image(systemName: "xmark.circle.fill") }
-                    .foregroundStyle(.white.opacity(0.5))
+                Button { selection = nil } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title3)
+                        .foregroundStyle(.white.opacity(0.5))
+                        .frame(width: 44, height: 44)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Dismiss \(title)")
             }
+            .padding(.trailing, -10)   // pull the 44pt hit area back to the card edge
             Text(detail).font(.caption.monospacedDigit()).foregroundStyle(.white.opacity(0.7))
             if let body {
                 Text(body).font(.caption).foregroundStyle(.white.opacity(0.6)).fixedSize(horizontal: false, vertical: true)
@@ -282,7 +400,7 @@ struct GalaxyMapView: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .background(.ultraThinMaterial, in: .rect(cornerRadius: Theme.cardRadius))
         .padding(.horizontal)
     }
 

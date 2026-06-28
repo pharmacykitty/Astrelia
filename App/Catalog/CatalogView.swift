@@ -152,8 +152,7 @@ private struct DetailScaffold<Facts: View, Description: View, Action: View>: Vie
 
     var body: some View {
         ZStack {
-            LinearGradient(colors: [Color(red: 0.03, green: 0.04, blue: 0.12), .black],
-                           startPoint: .top, endPoint: .bottom).ignoresSafeArea()
+            Theme.spaceGradient.ignoresSafeArea()
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     VStack(spacing: 12) {
@@ -168,7 +167,7 @@ private struct DetailScaffold<Facts: View, Description: View, Action: View>: Vie
                     .padding(.top, 20)
 
                     VStack(spacing: 0) { facts }
-                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+                        .background(.ultraThinMaterial, in: .rect(cornerRadius: Theme.cardRadius))
 
                     description.font(.body).foregroundStyle(.white.opacity(0.8))
 

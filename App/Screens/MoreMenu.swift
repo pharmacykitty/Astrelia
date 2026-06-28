@@ -27,13 +27,7 @@ struct MoreMenuView: View {
             .toolbarBackground(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button { dismiss() } label: {
-                        Image(systemName: "xmark")
-                            .font(.subheadline.weight(.bold))
-                            .foregroundStyle(.white.opacity(0.85))
-                            .frame(width: 30, height: 30)
-                            .background(.ultraThinMaterial, in: Circle())
-                    }
+                    CircleIconButton(label: "Close", systemImage: "xmark") { dismiss() }
                 }
             }
         }
@@ -120,11 +114,11 @@ private struct DestinationCard: View {
                 .foregroundStyle(.white.opacity(0.3))
         }
         .padding(16)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
+        .background(.ultraThinMaterial, in: .rect(cornerRadius: Theme.panelRadius))
+        .overlay {
+            RoundedRectangle(cornerRadius: Theme.panelRadius)
                 .strokeBorder(.white.opacity(0.08), lineWidth: 0.5)
-        )
+        }
     }
 }
 

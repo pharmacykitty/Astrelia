@@ -46,7 +46,9 @@ struct ContentView: View {
             let size = geometry.size
             ZStack {
                 if mode == .ar {
-                    ARCameraView(controller: arController).ignoresSafeArea()
+                    ARCameraView(controller: arController)
+                        .frame(width: size.width, height: size.height)
+                        .ignoresSafeArea()
                 } else {
                     background
                 }
@@ -281,16 +283,6 @@ struct ContentView: View {
         }
     }
 
-    private func circleButton(_ systemName: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: systemName)
-                .font(.title3).foregroundStyle(.white)
-                .frame(width: 44, height: 44)
-                .background(.ultraThinMaterial, in: Circle())
-                .overlay(Circle().strokeBorder(.white.opacity(0.15), lineWidth: 0.5))
-        }
-    }
-
     /// Top safe-area inset (Dynamic Island / notch). The sky is full-bleed, so the
     /// chrome reads this directly to keep its controls clear of the island.
     private var safeAreaTop: CGFloat {
@@ -304,7 +296,7 @@ struct ContentView: View {
     private func chrome(size: CGSize) -> some View {
         VStack(spacing: 12) {
             HStack(spacing: 12) {
-                circleButton("square.grid.2x2") { showMenu = true }
+                CircleIconButton(label: "Menu", systemImage: "square.grid.2x2") { showMenu = true }
                     .rotationEffect(.degrees(uiRotation))
 
                 Spacer()
@@ -316,10 +308,11 @@ struct ContentView: View {
                 .pickerStyle(.segmented)
                 .frame(width: 132)
                 .rotationEffect(.degrees(uiRotation))
+                .sensoryFeedback(.selection, trigger: mode)
 
                 Spacer()
 
-                circleButton("slider.horizontal.3") { showFilters = true }
+                CircleIconButton(label: "Sky filters", systemImage: "slider.horizontal.3") { showFilters = true }
                     .rotationEffect(.degrees(uiRotation))
             }
 
@@ -346,11 +339,19 @@ struct ContentView: View {
             }
             Spacer()
             Button { self.selection = nil } label: {
-                Image(systemName: "xmark.circle.fill").foregroundStyle(.white.opacity(0.5))
+                Image(systemName: "xmark.circle.fill")
+                    .font(.title3)
+                    .foregroundStyle(.white.opacity(0.5))
+                    .frame(width: 44, height: 44)
+                    .contentShape(.rect)
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Dismiss \(selection.title)")
         }
-        .padding(12)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+        .padding(.leading, 12)
+        .padding(.trailing, 2)
+        .padding(.vertical, 2)
+        .background(.ultraThinMaterial, in: .rect(cornerRadius: Theme.cardRadius))
     }
 
     @ViewBuilder
@@ -385,7 +386,8 @@ struct ContentView: View {
                     Text("auto · tap to refine").font(.caption).foregroundStyle(.white.opacity(0.55))
                 }
             }
-            .padding(10).background(.ultraThinMaterial, in: Capsule())
+            .padding(10).background(.ultraThinMaterial, in: .capsule)
+            .sensoryFeedback(.success, trigger: manuallyCalibrated)
         }
     }
 

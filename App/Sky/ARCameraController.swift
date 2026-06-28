@@ -1,9 +1,14 @@
 import SwiftUI
 import ARKit
-import RealityKit
+import SceneKit
 import AVFoundation
 
-/// Owns the ARKit session and the `ARView` that shows the live camera feed.
+/// Owns the ARKit session and the `ARSCNView` that shows the live camera feed.
+///
+/// We use `ARSCNView` purely as a camera-passthrough backdrop — all of our sky
+/// overlay is drawn in SwiftUI on top, so we never add SceneKit content. (RealityKit's
+/// `ARView` was rendering a black background here even with a running session; `ARSCNView`
+/// reliably displays the captured camera image with an empty scene.)
 ///
 /// Uses `.gravity` (NOT `.gravityAndHeading`) world alignment on purpose: gravity
 /// fixes the vertical, but heading is tracked purely by visual-inertial odometry —
@@ -14,18 +19,15 @@ import AVFoundation
 @MainActor
 @Observable
 final class ARCameraController {
-    let arView = ARView(frame: .zero)
+    let sceneView = ARSCNView(frame: .zero)
     private(set) var isRunning = false
+
+    private var session: ARSession { sceneView.session }
 
     static var isSupported: Bool { ARWorldTrackingConfiguration.isSupported }
 
     func start() {
         guard ARWorldTrackingConfiguration.isSupported else { return }
-        // We drive the session ourselves (with `.gravity` alignment); without this,
-        // RealityKit runs its own config early — before camera permission resolves —
-        // and races our run, which can leave the passthrough feed blank.
-        arView.automaticallyConfigureSession = false
-
         // ARKit will only show the camera once permission is granted. Don't rely on
         // its implicit prompt (which doesn't reliably fire here, e.g. on a fresh
         // sideload where authorization resets to `.notDetermined`): request explicitly
@@ -49,22 +51,26 @@ final class ARCameraController {
         let configuration = ARWorldTrackingConfiguration()
         configuration.worldAlignment = .gravity
         configuration.planeDetection = []
-        arView.session.run(configuration, options: [.resetTracking, .removeExistingAnchors])
+        session.run(configuration, options: [.resetTracking, .removeExistingAnchors])
         isRunning = true
     }
 
     func stop() {
-        arView.session.pause()
+        session.pause()
         isRunning = false
     }
 
     /// Latest tracked frame (camera pose + intrinsics), read once per render frame.
-    var currentFrame: ARFrame? { arView.session.currentFrame }
+    var currentFrame: ARFrame? { session.currentFrame }
 }
 
-/// Hosts the camera `ARView` as the SwiftUI background for AR mode.
+/// Hosts the camera `ARSCNView` as the SwiftUI background for AR mode.
 struct ARCameraView: UIViewRepresentable {
     let controller: ARCameraController
-    func makeUIView(context: Context) -> ARView { controller.arView }
-    func updateUIView(_ uiView: ARView, context: Context) {}
+    func makeUIView(context: Context) -> ARSCNView {
+        let view = controller.sceneView
+        view.backgroundColor = .red   // DIAGNOSTIC: shows through only if the camera feed isn't drawing.
+        return view
+    }
+    func updateUIView(_ uiView: ARSCNView, context: Context) {}
 }
