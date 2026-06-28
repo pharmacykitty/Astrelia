@@ -10,6 +10,9 @@ struct AstrolabeApp: App {
             if ProcessInfo.processInfo.arguments.contains("-snapshotSphere") {
                 NavigationStack { SphereSnapshotHarness() }
                     .preferredColorScheme(.dark)
+            } else if ProcessInfo.processInfo.arguments.contains("-snapshotStar") {
+                NavigationStack { StarSnapshotHarness() }
+                    .preferredColorScheme(.dark)
             } else {
                 ContentView()
             }

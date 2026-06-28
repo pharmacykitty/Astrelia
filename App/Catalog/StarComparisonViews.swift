@@ -118,14 +118,12 @@ struct StarSizeView: View {
             .frame(height: 150)
             .background(.black.opacity(0.25), in: RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.white.opacity(0.10), lineWidth: 0.5))
-            .overlay(alignment: .bottom) {
-                HStack {
-                    Text("Sun · 1 R☉").frame(maxWidth: .infinity)
-                    Text("\(starName) · ≈ \(radiusLabel) R☉").frame(maxWidth: .infinity)
-                }
-                .font(.caption2).foregroundStyle(.white.opacity(0.6))
-                .padding(.bottom, 6)
+
+            HStack {
+                Text("Sun · 1 R☉").frame(maxWidth: .infinity)
+                Text("\(starName) · ≈ \(radiusLabel) R☉").frame(maxWidth: .infinity)
             }
+            .font(.caption2).foregroundStyle(.white.opacity(0.6))
         }
     }
 
