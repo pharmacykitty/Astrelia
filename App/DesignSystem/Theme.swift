@@ -49,6 +49,9 @@ extension View {
                          cornerRadius: CGFloat = Theme.cardRadius,
                          glow: CGFloat = 10) -> some View {
         background(.ultraThinMaterial, in: .rect(cornerRadius: cornerRadius))
+            // Clip the content to the rounded shape so row separators (and anything
+            // else at the edges) can't poke past the corners.
+            .clipShape(.rect(cornerRadius: cornerRadius))
             .overlay {
                 RoundedRectangle(cornerRadius: cornerRadius)
                     .strokeBorder(tint.opacity(0.35), lineWidth: 1)

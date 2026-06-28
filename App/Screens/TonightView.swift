@@ -110,12 +110,21 @@ struct TonightView: View {
 
         if !up.isEmpty {
             sectionLabel("Planets up now", "sparkles")
-            VStack(spacing: 0) { ForEach(up) { planetRow($0, up: true) } }.luminousSurface(.cyan)
+            VStack(spacing: 0) {
+                ForEach(Array(up.enumerated()), id: \.element.id) { i, body in
+                    planetRow(body, up: true, divider: i < up.count - 1)
+                }
+            }
+            .luminousSurface(.cyan)
         }
         if !down.isEmpty {
             sectionLabel("Below the horizon", "arrow.down.to.line")
-            VStack(spacing: 0) { ForEach(down) { planetRow($0, up: false) } }
-                .luminousSurface(Color(white: 0.6))
+            VStack(spacing: 0) {
+                ForEach(Array(down.enumerated()), id: \.element.id) { i, body in
+                    planetRow(body, up: false, divider: i < down.count - 1)
+                }
+            }
+            .luminousSurface(Color(white: 0.6))
         }
     }
 
@@ -128,11 +137,16 @@ struct TonightView: View {
                 VStack(spacing: 0) { showerRow(next) }.luminousSurface(.pink)
             }
         } else {
-            VStack(spacing: 0) { ForEach(active) { showerRow($0) } }.luminousSurface(.pink)
+            VStack(spacing: 0) {
+                ForEach(Array(active.enumerated()), id: \.element.id) { i, shower in
+                    showerRow(shower, divider: i < active.count - 1)
+                }
+            }
+            .luminousSurface(.pink)
         }
     }
 
-    private func showerRow(_ shower: MeteorShower) -> some View {
+    private func showerRow(_ shower: MeteorShower, divider: Bool = false) -> some View {
         let days = MeteorShowers.daysUntilPeak(shower, from: asOf)
         let when = days == 0 ? "peaks tonight" : days == 1 ? "peaks tomorrow" : "peaks in \(days) days"
         return HStack(alignment: .firstTextBaseline) {
@@ -145,7 +159,7 @@ struct TonightView: View {
             Text(when).font(.subheadline).foregroundStyle(.white.opacity(0.75))
         }
         .padding(.horizontal, 14).padding(.vertical, 11)
-        .overlay(Divider().background(.white.opacity(0.08)), alignment: .bottom)
+        .overlay(alignment: .bottom) { if divider { Divider().background(.white.opacity(0.08)) } }
     }
 
     private func sectionLabel(_ text: String, _ symbol: String) -> some View {
@@ -154,7 +168,7 @@ struct TonightView: View {
             .padding(.top, 4)
     }
 
-    private func planetRow(_ body: SkyBodyStatus, up: Bool) -> some View {
+    private func planetRow(_ body: SkyBodyStatus, up: Bool, divider: Bool = true) -> some View {
         HStack {
             Text(body.name).foregroundStyle(.white)
             Spacer()
@@ -170,7 +184,7 @@ struct TonightView: View {
         }
         .font(.subheadline)
         .padding(.horizontal, 14).padding(.vertical, 11)
-        .overlay(Divider().background(.white.opacity(0.08)), alignment: .bottom)
+        .overlay(alignment: .bottom) { if divider { Divider().background(.white.opacity(0.08)) } }
     }
 
     // MARK: Compute
