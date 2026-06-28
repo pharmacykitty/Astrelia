@@ -94,7 +94,9 @@ final class ExoplanetStore {
         var rows = text.split(separator: "\n", omittingEmptySubsequences: true).makeIterator()
         guard let header = rows.next() else { return [] }
         let columns = parseCSVLine(String(header))
-        let index = Dictionary(uniqueKeysWithValues: columns.enumerated().map { ($1, $0) })
+        // Keep the first column of each name; NASA's CSV exports can carry blank
+        // trailing headers, and `uniqueKeysWithValues` traps on the duplicate "".
+        let index = Dictionary(columns.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
         func col(_ fields: [String], _ name: String) -> String? {
             guard let i = index[name], i < fields.count, !fields[i].isEmpty else { return nil }
             return fields[i]
