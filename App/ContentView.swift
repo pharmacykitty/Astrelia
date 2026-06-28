@@ -566,19 +566,25 @@ struct ContentView: View {
         func make(_ name: String, _ color: Color, _ size2: CGFloat, _ glow: CGFloat,
                   _ equatorial: EquatorialCoordinates) -> ProjectedBody {
             let horizon = CoordinateTransform.horizontal(equatorial, at: location, time: jd)
-            let direction = worldDirection(azimuth: horizon.azimuth, altitude: horizon.altitude)
+            // Atmospheric refraction lifts a body's apparent altitude (≈34′ at the
+            // horizon, ~0 overhead) — apply it so the luminaries sit where the eye
+            // actually sees them, especially near the horizon.
+            let altitude = Refraction.apparentAltitude(fromTrue: horizon.altitude)
+            let direction = worldDirection(azimuth: horizon.azimuth, altitude: altitude)
             return ProjectedBody(
                 id: name, name: name, color: color, size: size2, glow: glow,
-                azimuth: horizon.azimuth, altitude: horizon.altitude,
+                azimuth: horizon.azimuth, altitude: altitude,
                 screen: camera.projectDirection(direction),
                 deltaAzimuth: signedDelta(horizon.azimuth.degrees - pointing.azimuth.degrees),
-                deltaAltitude: horizon.altitude.degrees - pointing.altitude.degrees
+                deltaAltitude: altitude.degrees - pointing.altitude.degrees
             )
         }
 
         return SolarState(pointing: pointing, bodies: [
             make("Sun", .orange, 24, 26, Sun.position(at: jd)),
-            make("Moon", Color(white: 0.92), 20, 18, Moon.position(at: jd)),
+            // The Moon is close enough that topocentric parallax shifts it up to ~1°
+            // from its geocentric position — correct it for the observer's location.
+            make("Moon", Color(white: 0.92), 20, 18, Moon.topocentric(at: jd, observer: location)),
         ])
     }
 

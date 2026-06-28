@@ -146,6 +146,9 @@ enum SourceCatalog {
                         detail: "Stick-figure constellation geometry from the d3-celestial project by Olaf Frohn.",
                         license: "BSD-3-Clause",
                         url: "https://github.com/ofrohn/d3-celestial"),
+            SourceEntry(name: "Messier & NGC catalogs",
+                        detail: "Charles Messier's catalogue (110 objects) and the New General Catalogue of nebulae, clusters, and galaxies — positions, magnitudes, types, and sizes for the deep-sky browser.",
+                        license: "Public domain"),
         ]),
         SourceGroup(title: "Planets & Exoplanets", tint: .cyan, entries: [
             SourceEntry(name: "NASA Exoplanet Archive",
