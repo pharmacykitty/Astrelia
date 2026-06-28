@@ -62,11 +62,17 @@ struct FilterSheet: View {
                     Text("Point at the ground to find things that have set — like the Sun at night.")
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(Theme.spaceGradient.ignoresSafeArea())
+            .listRowBackground(Color.white.opacity(0.05))
+            .tint(Theme.accent)
             .navigationTitle("Sky filters")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
+                        .fontWeight(.semibold)
+                        .foregroundStyle(Theme.accent)
                 }
             }
         }

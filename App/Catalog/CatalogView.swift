@@ -6,6 +6,7 @@ import CelestialCore
 /// that can launch the Galaxy Map focused on that object.
 struct CatalogView: View {
     let store: StarCatalogStore
+    let exo: ExoplanetStore
     @State private var query = ""
     @State private var namedStars: [Star] = []
 
@@ -15,9 +16,20 @@ struct CatalogView: View {
                 Section("Landmarks") {
                     ForEach(filteredLandmarks) { landmark in
                         NavigationLink {
-                            LandmarkDetailView(landmark: landmark, store: store)
+                            LandmarkDetailView(landmark: landmark, store: store, exo: exo)
                         } label: {
                             landmarkRow(landmark)
+                        }
+                    }
+                }
+            }
+            if !filteredSystems.isEmpty {
+                Section(query.isEmpty ? "Planetary Systems" : "Systems") {
+                    ForEach(filteredSystems) { system in
+                        NavigationLink {
+                            SystemView(system: system)
+                        } label: {
+                            systemRow(system)
                         }
                     }
                 }
@@ -26,7 +38,7 @@ struct CatalogView: View {
                 Section(query.isEmpty ? "Brightest Stars" : "Stars") {
                     ForEach(filteredStars, id: \.id) { star in
                         NavigationLink {
-                            StarDetailView(star: star, store: store)
+                            StarDetailView(star: star, store: store, exo: exo)
                         } label: {
                             starRow(star)
                         }
@@ -36,7 +48,7 @@ struct CatalogView: View {
         }
         .navigationTitle("Catalog")
         .navigationBarTitleDisplayMode(.inline)
-        .searchable(text: $query, prompt: "Search stars, nebulae, clusters…")
+        .searchable(text: $query, prompt: "Search stars, planets, nebulae…")
         .task(id: store.catalog?.count ?? 0) {
             guard namedStars.isEmpty, let catalog = store.catalog else { return }
             namedStars = catalog.stars
@@ -62,6 +74,33 @@ struct CatalogView: View {
             ($0.properName ?? "").lowercased().contains(q)
             || ($0.bayerFlamsteed ?? "").lowercased().contains(q)
             || ($0.constellation ?? "").lowercased().contains(q)
+        }
+    }
+
+    private var filteredSystems: [PlanetarySystem] {
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else {
+            return Array(exo.systems.sorted { $0.planets.count > $1.planets.count }.prefix(60))
+        }
+        return exo.systems.filter {
+            $0.hostName.lowercased().contains(q)
+            || $0.planets.contains { $0.name.lowercased().contains(q) }
+        }
+    }
+
+    private func systemRow(_ system: PlanetarySystem) -> some View {
+        Label {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(system.hostName)
+                Text([
+                    "\(system.planets.count) planet\(system.planets.count == 1 ? "" : "s")",
+                    system.spectralType,
+                    system.distanceLightYears.map { String(format: "%.0f ly", $0) },
+                ].compactMap { $0 }.joined(separator: " · "))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        } icon: {
+            Image(systemName: "circle.dotted.circle").foregroundStyle(.cyan)
         }
     }
 
@@ -96,6 +135,7 @@ struct CatalogView: View {
 private struct LandmarkDetailView: View {
     let landmark: Landmark
     let store: StarCatalogStore
+    let exo: ExoplanetStore
 
     var body: some View {
         DetailScaffold(symbol: landmark.type.symbol, tint: landmark.type.color, title: landmark.name,
@@ -108,7 +148,7 @@ private struct LandmarkDetailView: View {
         } description: {
             Text(landmark.summary)
         } action: {
-            GalaxyMapView(store: store, focus: .landmark(landmark))
+            GalaxyMapView(store: store, exo: exo, focus: .landmark(landmark))
         }
     }
 
@@ -120,6 +160,7 @@ private struct LandmarkDetailView: View {
 private struct StarDetailView: View {
     let star: Star
     let store: StarCatalogStore
+    let exo: ExoplanetStore
 
     var body: some View {
         DetailScaffold(symbol: "sparkle", tint: .yellow, title: star.properName ?? "Star \(star.id)",
@@ -134,7 +175,7 @@ private struct StarDetailView: View {
         } description: {
             EmptyView()
         } action: {
-            if star.distanceParsecs != nil { GalaxyMapView(store: store, focus: .star(star.id)) }
+            if star.distanceParsecs != nil { GalaxyMapView(store: store, exo: exo, focus: .star(star.id)) }
         }
     }
 }
@@ -156,7 +197,7 @@ private struct DetailScaffold<Facts: View, Description: View, Action: View>: Vie
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     VStack(spacing: 12) {
-                        Image(systemName: symbol).font(.system(size: 48)).foregroundStyle(tint)
+                        LuminousGlyph(symbol: symbol, tint: tint, size: 96, glyphSize: 42)
                         Text(title).font(.system(.largeTitle, design: .serif).weight(.bold))
                             .foregroundStyle(.white).multilineTextAlignment(.center)
                         if !subtitle.isEmpty {
@@ -167,7 +208,7 @@ private struct DetailScaffold<Facts: View, Description: View, Action: View>: Vie
                     .padding(.top, 20)
 
                     VStack(spacing: 0) { facts }
-                        .background(.ultraThinMaterial, in: .rect(cornerRadius: Theme.cardRadius))
+                        .luminousSurface(tint)
 
                     description.font(.body).foregroundStyle(.white.opacity(0.8))
 
@@ -175,7 +216,7 @@ private struct DetailScaffold<Facts: View, Description: View, Action: View>: Vie
                         Label("View in Galaxy Map", systemImage: "hurricane")
                             .font(.headline).frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.borderedProminent).tint(.purple).controlSize(.large)
+                    .buttonStyle(LuminousButtonStyle(tint: .purple))
                 }
                 .padding()
             }

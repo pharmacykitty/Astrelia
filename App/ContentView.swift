@@ -16,6 +16,7 @@ private enum SkyMode: Hashable { case virtual, ar }
 struct ContentView: View {
     @State private var provider = SkyMotionProvider()
     @State private var store = StarCatalogStore()
+    @State private var exoStore = ExoplanetStore()
     @State private var arController = ARCameraController()
     @State private var filters = SkyFilters()
     @State private var showFilters = false
@@ -88,6 +89,7 @@ struct ContentView: View {
         .onAppear {
             provider.start()
             store.loadIfNeeded()
+            exoStore.loadIfNeeded()
             // The full-screen menu makes this view disappear (pausing the sensors);
             // on return, resume the AR session too if we're in AR mode.
             if mode == .ar { arController.start() }
@@ -117,7 +119,7 @@ struct ContentView: View {
                 .presentationDetents([.medium, .large])
         }
         .fullScreenCover(isPresented: $showMenu) {
-            MoreMenuView(store: store)
+            MoreMenuView(store: store, exo: exoStore)
         }
     }
 
@@ -263,8 +265,7 @@ struct ContentView: View {
     private var skyStatusOverlay: some View {
         if let status = skyStatus {
             VStack(spacing: 14) {
-                Image(systemName: status.symbol)
-                    .font(.system(size: 38)).foregroundStyle(.white.opacity(0.85))
+                LuminousGlyph(symbol: status.symbol, tint: Theme.accent, size: 72, glyphSize: 32)
                 Text(status.message)
                     .font(.callout).multilineTextAlignment(.center)
                     .foregroundStyle(.white.opacity(0.85))
@@ -272,13 +273,13 @@ struct ContentView: View {
                     Button("Open Settings") {
                         if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
                     }
-                    .buttonStyle(.borderedProminent).tint(.white)
+                    .buttonStyle(LuminousButtonStyle())
                 } else {
-                    ProgressView().tint(.white).padding(.top, 2)
+                    ProgressView().tint(Theme.accent).padding(.top, 2)
                 }
             }
             .padding(28)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24))
+            .luminousSurface(Theme.accent, cornerRadius: 24, glow: 16)
             .padding(40)
         }
     }
@@ -351,7 +352,7 @@ struct ContentView: View {
         .padding(.leading, 12)
         .padding(.trailing, 2)
         .padding(.vertical, 2)
-        .background(.ultraThinMaterial, in: .rect(cornerRadius: Theme.cardRadius))
+        .luminousSurface()
     }
 
     @ViewBuilder
@@ -363,13 +364,14 @@ struct ContentView: View {
                         Button(option.label) { calibrationTarget = option.id }
                     }
                 } label: {
-                    Label(calibrationTargetLabel, systemImage: "scope").font(.subheadline)
+                    Label(calibrationTargetLabel, systemImage: "scope")
+                        .font(.subheadline).foregroundStyle(Theme.accent)
                 }
                 Spacer()
-                Button("Align") { alignCalibration() }.buttonStyle(.borderedProminent)
+                Button("Align") { alignCalibration() }.buttonStyle(LuminousButtonStyle())
                 Button("Cancel") { calibrating = false }.foregroundStyle(.white.opacity(0.7))
             }
-            .padding(10).background(.ultraThinMaterial, in: Capsule())
+            .padding(8).luminousSurface(Theme.accent, cornerRadius: 26, glow: 8)
         } else {
             HStack(spacing: 12) {
                 Button { startCalibration() } label: {

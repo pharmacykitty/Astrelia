@@ -5,6 +5,7 @@ import SwiftUI
 /// edge-to-edge immersive with no card gap revealing the sky behind.
 struct MoreMenuView: View {
     let store: StarCatalogStore
+    let exo: ExoplanetStore
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -75,28 +76,21 @@ struct MoreMenuView: View {
     @ViewBuilder
     private func destination(_ screen: AppScreen) -> some View {
         switch screen {
-        case .catalog: CatalogView(store: store)
-        case .galaxyMap: GalaxyMapView(store: store)
+        case .catalog: CatalogView(store: store, exo: exo)
+        case .galaxyMap: GalaxyMapView(store: store, exo: exo)
         default: PlaceholderScreen(screen: screen)
         }
     }
 }
 
-/// A tappable card for one destination — tinted icon badge, title, subtitle.
+/// A tappable card for one destination — a luminous ringed glyph, title, subtitle,
+/// with the card itself rimmed and glowing in the feature's tint.
 private struct DestinationCard: View {
     let screen: AppScreen
 
     var body: some View {
         HStack(spacing: 16) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(LinearGradient(colors: screen.gradient, startPoint: .topLeading, endPoint: .bottomTrailing))
-                Image(systemName: screen.symbol)
-                    .font(.system(size: 22, weight: .medium))
-                    .foregroundStyle(.white)
-            }
-            .frame(width: 52, height: 52)
-            .shadow(color: screen.gradient.first?.opacity(0.5) ?? .clear, radius: 8, y: 3)
+            LuminousGlyph(symbol: screen.symbol, tint: screen.tint, size: 52, glyphSize: 21)
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(screen.title)
@@ -111,14 +105,33 @@ private struct DestinationCard: View {
 
             Image(systemName: "chevron.right")
                 .font(.footnote.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.3))
+                .foregroundStyle(screen.tint.opacity(0.6))
         }
         .padding(16)
-        .background(.ultraThinMaterial, in: .rect(cornerRadius: Theme.panelRadius))
-        .overlay {
-            RoundedRectangle(cornerRadius: Theme.panelRadius)
-                .strokeBorder(.white.opacity(0.08), lineWidth: 0.5)
-        }
+        .luminousSurface(screen.tint, cornerRadius: Theme.panelRadius, glow: 12)
+    }
+}
+
+/// A circular glyph in the luminous-instrument language: a tinted ring and soft
+/// glow around a symbol, over a near-transparent wash. Shared by the menu cards
+/// and the placeholder/detail headers so they read as one family.
+struct LuminousGlyph: View {
+    let symbol: String
+    let tint: Color
+    var size: CGFloat = 52
+    var glyphSize: CGFloat = 21
+
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.system(size: glyphSize, weight: .medium))
+            .foregroundStyle(tint)
+            .frame(width: size, height: size)
+            .background {
+                Circle().fill(.ultraThinMaterial)
+                Circle().fill(tint.opacity(0.12))
+            }
+            .overlay { Circle().strokeBorder(tint.opacity(0.55), lineWidth: 1) }
+            .shadow(color: tint.opacity(0.45), radius: size * 0.18)
     }
 }
 
@@ -211,27 +224,18 @@ struct PlaceholderScreen: View {
 
     var body: some View {
         ZStack {
-            LinearGradient(colors: [Color(red: 0.03, green: 0.04, blue: 0.12), .black],
-                           startPoint: .top, endPoint: .bottom)
-                .ignoresSafeArea()
+            Theme.spaceGradient.ignoresSafeArea()
             VStack(spacing: 16) {
-                ZStack {
-                    Circle()
-                        .fill(LinearGradient(colors: screen.gradient, startPoint: .topLeading, endPoint: .bottomTrailing))
-                        .frame(width: 96, height: 96)
-                        .shadow(color: screen.gradient.first?.opacity(0.6) ?? .clear, radius: 16)
-                    Image(systemName: screen.symbol)
-                        .font(.system(size: 42))
-                        .foregroundStyle(.white)
-                }
+                LuminousGlyph(symbol: screen.symbol, tint: screen.tint, size: 96, glyphSize: 40)
                 Text(screen.title)
                     .font(.system(.largeTitle, design: .serif).weight(.bold))
                     .foregroundStyle(.white)
                 Text(screen.subtitle)
                     .font(.headline).foregroundStyle(.white.opacity(0.7))
+                    .multilineTextAlignment(.center)
                 Text("Coming soon")
                     .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.white.opacity(0.4))
+                    .foregroundStyle(screen.tint.opacity(0.7))
                     .padding(.top, 4)
             }
             .padding()
@@ -242,5 +246,5 @@ struct PlaceholderScreen: View {
 }
 
 #Preview {
-    MoreMenuView(store: StarCatalogStore())
+    MoreMenuView(store: StarCatalogStore(), exo: ExoplanetStore())
 }

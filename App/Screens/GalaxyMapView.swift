@@ -15,10 +15,13 @@ enum GalaxyMapFocus {
 
 struct GalaxyMapView: View {
     let store: StarCatalogStore
+    let exo: ExoplanetStore
     var focus: GalaxyMapFocus? = nil
     @Environment(\.dismiss) private var dismiss
 
     @State private var focusApplied = false
+    @State private var hostStarIDs: Set<Int> = []   // catalog stars that host known planets
+    @State private var shownSystem: PlanetarySystem?
     @State private var stars: [GalaxyStar] = []
     @State private var backdrop: [BackdropPoint] = []   // stylized Milky Way (art, not catalogued)
     @State private var flightTask: Task<Void, Never>?
@@ -32,10 +35,14 @@ struct GalaxyMapView: View {
     @State private var dragPrevious: CGSize = .zero
     @State private var zoomAnchor: Float = 220
 
-    // Free-fly camera: a free eye position + look direction, moved by a throttle.
+    // Free-fly camera: a free eye position + look direction. One finger drags to
+    // steer; a two-finger vertical drag sets a *persistent* throttle (-1…1) so you
+    // can lift off and cruise hands-free while steering. `throttling` is true only
+    // while the two-finger gesture is active, so steering is suppressed mid-throttle.
     @State private var flyMode = false
     @State private var eye = SIMD3<Float>(0, 0, 0)
     @State private var throttle: Float = 0
+    @State private var throttling = false
     @State private var flyTask: Task<Void, Never>?
     private let flySpeed: Float = 1540   // parsecs/second at full throttle
 
@@ -79,9 +86,21 @@ struct GalaxyMapView: View {
         .ignoresSafeArea()
         .toolbar(.hidden, for: .navigationBar)
         .task(id: store.catalog?.count ?? 0) {
-            buildStars(); buildBackdrop(); applyInitialFocusIfNeeded()
+            buildStars(); buildBackdrop(); applyInitialFocusIfNeeded(); computeHostStars()
         }
+        .task(id: exo.systems.count) { computeHostStars() }
         .onDisappear { flightTask?.cancel(); flyTask?.cancel() }
+        .fullScreenCover(item: $shownSystem) { SystemView(system: $0) }
+    }
+
+    /// Which catalog stars host known planets — so the map can badge them.
+    private func computeHostStars() {
+        guard hostStarIDs.isEmpty, let catalog = store.catalog, !exo.hostHIPs.isEmpty else { return }
+        var ids = Set<Int>()
+        for star in catalog.stars {
+            if let hip = star.hipparcos, exo.hostHIPs.contains(hip) { ids.insert(star.id) }
+        }
+        hostStarIDs = ids
     }
 
     /// Device safe-area insets, read directly since the map ignores the safe area
@@ -152,6 +171,8 @@ struct GalaxyMapView: View {
         // sub-pixel culling and an overall cap for level-of-detail.
         var starPaths = Array(repeating: Path(), count: starPalette.count)
         var glowPath = Path()
+        var hostBadges = Path()         // rings around stars with known planets
+        let badging = !hostStarIDs.isEmpty
         var drawn = 0
         for star in stars {
             guard let (p, depth) = project(star.position, viewProjection, size) else { continue }
@@ -163,6 +184,10 @@ struct GalaxyMapView: View {
                 glowPath.addEllipse(in: CGRect(x: p.x - g, y: p.y - g, width: g * 2, height: g * 2))
             }
             starPaths[star.colorBucket].addEllipse(in: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2))
+            if badging, hostStarIDs.contains(star.id) {
+                let br = max(r + 3, 5)
+                hostBadges.addEllipse(in: CGRect(x: p.x - br, y: p.y - br, width: br * 2, height: br * 2))
+            }
             drawn += 1
             if drawn >= 14000 { break }
         }
@@ -170,6 +195,7 @@ struct GalaxyMapView: View {
         for i in starPalette.indices {
             context.fill(starPaths[i], with: .color(starPalette[i].opacity(0.95)))
         }
+        context.stroke(hostBadges, with: .color(Color(red: 0.4, green: 0.95, blue: 0.9).opacity(0.8)), lineWidth: 1)
 
         // The Sun at the origin.
         if let (sunPoint, _) = project(.zero, viewProjection, size) {
@@ -331,7 +357,7 @@ struct GalaxyMapView: View {
                 if let selection {
                     selectionCard(selection)
                 } else {
-                    Text(flyMode ? "Drag to aim · use the throttle to fly"
+                    Text(flyMode ? "Drag to steer · two-finger drag up/down to set speed"
                                  : "Drag to orbit · pinch to zoom · tap a star or landmark")
                         .font(.caption).foregroundStyle(.white.opacity(0.45))
                         .multilineTextAlignment(.center).padding(.horizontal)
@@ -340,10 +366,21 @@ struct GalaxyMapView: View {
             .padding(.bottom, safeInsets.bottom + 10)
 
             if flyMode {
-                HStack {
-                    Spacer()
-                    ThrottleControl(throttle: $throttle).padding(.trailing, 14)
+                // Steering anchor at screen centre.
+                FlyReticle()
+
+                // Persistent-speed feedback near the top; only shown while moving.
+                if throttle != 0 {
+                    VStack {
+                        Spacer().frame(height: safeInsets.top + 52)
+                        SpeedReadout(throttle: throttle, maxSpeed: flySpeed)
+                        Spacer()
+                    }
                 }
+
+                // Invisible: adds a window-level two-finger pan recogniser that feeds
+                // the throttle without blocking one-finger steering or taps.
+                TwoFingerVerticalPan(throttle: $throttle, active: $throttling)
             }
         }
     }
@@ -351,8 +388,12 @@ struct GalaxyMapView: View {
     @ViewBuilder
     private func selectionCard(_ selection: MapSelection) -> some View {
         switch selection {
-        case .star(let star): card(title: star.name, tint: .white, detail: starDetail(star), body: nil) { flyTo(star) }
-        case .landmark(let lm): card(title: lm.name, tint: lm.type.color, detail: landmarkDetail(lm), body: lm.summary) { flyTo(lm) }
+        case .star(let star):
+            let system = star.hip.flatMap { exo.byHIP[$0] }
+            card(title: star.name, tint: .white, detail: starDetail(star), body: nil,
+                 systemAction: system.map { sys in { shownSystem = sys } }) { flyTo(star) }
+        case .landmark(let lm):
+            card(title: lm.name, tint: lm.type.color, detail: landmarkDetail(lm), body: lm.summary) { flyTo(lm) }
         }
     }
 
@@ -372,7 +413,8 @@ struct GalaxyMapView: View {
         ly >= 10000 ? String(format: "%.0fk", ly / 1000) : String(format: "%.0f", ly)
     }
 
-    private func card(title: String, tint: Color, detail: String, body: String?, fly: @escaping () -> Void) -> some View {
+    private func card(title: String, tint: Color, detail: String, body: String?,
+                      systemAction: (() -> Void)? = nil, fly: @escaping () -> Void) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text(title).font(.title3.weight(.semibold)).foregroundStyle(.white)
@@ -392,15 +434,23 @@ struct GalaxyMapView: View {
             if let body {
                 Text(body).font(.caption).foregroundStyle(.white.opacity(0.6)).fixedSize(horizontal: false, vertical: true)
             }
-            Button(action: fly) {
-                Label("Fly here", systemImage: "paperplane.fill").font(.subheadline)
+            HStack(spacing: 8) {
+                Button(action: fly) {
+                    Label("Fly here", systemImage: "paperplane.fill").font(.subheadline)
+                }
+                .buttonStyle(LuminousButtonStyle(tint: tint == .white ? Theme.accent : tint))
+                if let systemAction {
+                    Button(action: systemAction) {
+                        Label("System", systemImage: "circle.dotted.circle").font(.subheadline)
+                    }
+                    .buttonStyle(LuminousButtonStyle(tint: .cyan))
+                }
             }
-            .buttonStyle(.borderedProminent).tint(tint == .white ? .blue : tint)
             .padding(.top, 2)
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.ultraThinMaterial, in: .rect(cornerRadius: Theme.cardRadius))
+        .luminousSurface(tint == .white ? Theme.accent : tint)
         .padding(.horizontal)
     }
 
@@ -439,7 +489,11 @@ struct GalaxyMapView: View {
                 let dt = Float(min(0.05, now.timeIntervalSince(last)))
                 last = now
                 if throttle != 0 {
-                    eye += (-lookDirection) * (throttle * flySpeed * dt)
+                    // Square the throttle (keeping its sign) so low settings give
+                    // fine, slow movement near a star and full throttle still crosses
+                    // the galaxy quickly.
+                    let speed = (throttle < 0 ? -1 : 1) * throttle * throttle * flySpeed
+                    eye += (-lookDirection) * (speed * dt)
                 }
                 try? await Task.sleep(for: .milliseconds(16))
             }
@@ -451,6 +505,7 @@ struct GalaxyMapView: View {
         target = eye - lookDirection * distance   // resume orbit around a point ahead
         flyMode = false
         throttle = 0
+        throttling = false
         flyTask?.cancel()
     }
 
@@ -533,6 +588,9 @@ struct GalaxyMapView: View {
     private var dragGesture: some Gesture {
         DragGesture()
             .onChanged { value in
+                // Ignore stray single-finger tracking while a two-finger throttle
+                // gesture is in progress, so the view doesn't drift as you set speed.
+                guard !throttling else { return }
                 flightTask?.cancel()
                 let dx = Float(value.translation.width - dragPrevious.width)
                 let dy = Float(value.translation.height - dragPrevious.height)
@@ -546,6 +604,7 @@ struct GalaxyMapView: View {
     private var zoomGesture: some Gesture {
         MagnificationGesture()
             .onChanged { value in
+                guard !flyMode else { return }   // in fly mode two fingers set throttle, not zoom
                 flightTask?.cancel()
                 distance = min(60000, max(2, zoomAnchor / Float(value)))
             }
@@ -595,6 +654,7 @@ struct GalaxyMapView: View {
             let absoluteMagnitude = star.apparentMagnitude - 5 * (log10(parsecs) - 1)
             result.append(GalaxyStar(
                 id: star.id,
+                hip: star.hipparcos,
                 position: position,
                 colorBucket: starBucket(star.colorIndex),
                 baseSize: max(0.6, CGFloat(7 - absoluteMagnitude) * 0.32),
@@ -722,6 +782,7 @@ struct GalaxyMapView: View {
 
 private struct GalaxyStar: Identifiable {
     let id: Int
+    let hip: Int?
     let position: SIMD3<Float>      // parsecs, equatorial, Sun at origin
     let colorBucket: Int           // index into starPalette
     let baseSize: CGFloat
@@ -750,43 +811,113 @@ private let backdropPalette: [Color] = [
 
 private let backdropOpacityLevels: [Double] = [0.12, 0.28, 0.5, 0.75]
 
-/// A spring-centred vertical throttle for free-fly: drag up to fly forward, down
-/// to reverse; releases back to zero. Bound value is -1…1.
-private struct ThrottleControl: View {
-    @Binding var throttle: Float
-    private let height: CGFloat = 200
-    private let knob: CGFloat = 34
+/// Faint crosshair marking the centre of the screen — the point you're flying
+/// toward and steering around in free-fly mode.
+private struct FlyReticle: View {
+    var body: some View {
+        ZStack {
+            Circle().stroke(.white.opacity(0.22), lineWidth: 1).frame(width: 26, height: 26)
+            Rectangle().fill(.white.opacity(0.28)).frame(width: 1, height: 9)
+            Rectangle().fill(.white.opacity(0.28)).frame(width: 9, height: 1)
+        }
+        .allowsHitTesting(false)
+    }
+}
+
+/// Non-interactive speed feedback for free-fly: shows the current throttle as a
+/// percentage and the resulting speed. Green forward, orange in reverse.
+private struct SpeedReadout: View {
+    let throttle: Float
+    let maxSpeed: Float
 
     var body: some View {
-        let travel = height / 2 - knob / 2
-        ZStack {
-            Capsule().fill(.ultraThinMaterial)
-            Capsule().strokeBorder(.white.opacity(0.15), lineWidth: 0.5)
-            VStack {
-                Image(systemName: "chevron.up").font(.caption2)
-                Spacer()
-                Image(systemName: "chevron.down").font(.caption2)
-            }
-            .foregroundStyle(.white.opacity(0.4)).padding(.vertical, 8)
-            Rectangle().fill(.white.opacity(0.2)).frame(height: 1)   // zero mark
-
-            Circle()
-                .fill(throttle == 0 ? Color.white : Color.green)
-                .frame(width: knob, height: knob)
-                .overlay(Image(systemName: "paperplane.fill").font(.caption2).foregroundStyle(.black.opacity(0.7)))
-                .offset(y: -CGFloat(throttle) * travel)
-                .shadow(radius: 3)
+        let magnitude = throttle * throttle                 // matches the movement curve
+        let pct = Int((magnitude * 100).rounded())
+        let speed = magnitude * maxSpeed
+        let forward = throttle >= 0
+        HStack(spacing: 6) {
+            Image(systemName: forward ? "chevron.up" : "chevron.down")
+                .font(.caption2.weight(.bold))
+            Text("\(pct)%").font(.caption.monospacedDigit().weight(.semibold))
+            Text(String(format: "· %.0f pc/s", speed))
+                .font(.caption2.monospacedDigit()).foregroundStyle(.white.opacity(0.6))
         }
-        .frame(width: 46, height: height)
-        .contentShape(Rectangle())
-        .gesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { value in
-                    let center = height / 2
-                    throttle = max(-1, min(1, Float((center - value.location.y) / travel)))
-                }
-                .onEnded { _ in withAnimation(.spring(duration: 0.3)) { throttle = 0 } }
-        )
+        .foregroundStyle(forward ? Color.green : Color.orange)
+        .padding(.horizontal, 12).padding(.vertical, 7)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay(Capsule().strokeBorder(.white.opacity(0.12), lineWidth: 0.5))
+        .allowsHitTesting(false)
+    }
+}
+
+/// Bridges a window-level two-finger vertical `UIPanGestureRecognizer` to the
+/// throttle. The recogniser lives on the window (not this view) and requires
+/// exactly two touches, so it never competes with SwiftUI's one-finger steer/tap
+/// gestures. The view itself is transparent to touches (`hitTest` returns nil).
+/// Dragging up increases the throttle, down decreases/reverses it; the value
+/// persists when you let go (cruise control), with a small detent at zero.
+private struct TwoFingerVerticalPan: UIViewRepresentable {
+    @Binding var throttle: Float
+    @Binding var active: Bool
+    var sensitivity: Float = 0.0065   // throttle units per point of vertical drag
+
+    func makeUIView(context: Context) -> PassthroughPanView {
+        let view = PassthroughPanView()
+        view.pan.addTarget(context.coordinator, action: #selector(Coordinator.handle(_:)))
+        view.pan.delegate = context.coordinator
+        return view
+    }
+
+    func updateUIView(_ uiView: PassthroughPanView, context: Context) {
+        context.coordinator.parent = self
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        var parent: TwoFingerVerticalPan
+        init(_ parent: TwoFingerVerticalPan) { self.parent = parent }
+
+        @objc func handle(_ gesture: UIPanGestureRecognizer) {
+            switch gesture.state {
+            case .began:
+                parent.active = true
+            case .changed:
+                let dy = Float(gesture.translation(in: gesture.view).y)
+                gesture.setTranslation(.zero, in: gesture.view)   // accumulate incrementally
+                var next = parent.throttle - dy * parent.sensitivity   // up (dy<0) → faster
+                next = max(-1, min(1, next))
+                if abs(next) < 0.04 { next = 0 }                  // detent at rest
+                parent.throttle = next
+            case .ended, .cancelled, .failed:
+                parent.active = false
+            default:
+                break
+            }
+        }
+
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                               shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
+    }
+}
+
+/// A zero-cost passthrough view that owns a two-finger pan recogniser and parks
+/// it on the window so it sees touches landing anywhere on the map, while letting
+/// every touch fall through to the SwiftUI content beneath it.
+final class PassthroughPanView: UIView {
+    let pan: UIPanGestureRecognizer = {
+        let pan = UIPanGestureRecognizer()
+        pan.minimumNumberOfTouches = 2
+        pan.maximumNumberOfTouches = 2
+        return pan
+    }()
+
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? { nil }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        pan.view?.removeGestureRecognizer(pan)
+        window?.addGestureRecognizer(pan)
     }
 }
 

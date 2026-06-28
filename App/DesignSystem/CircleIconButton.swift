@@ -16,7 +16,7 @@ import SwiftUI
 struct CircleIconButton: View {
     let label: String
     let systemImage: String
-    var tint: Color = .white
+    var tint: Color = Theme.accent
     var isActive: Bool = false
     let action: () -> Void
 
@@ -28,14 +28,17 @@ struct CircleIconButton: View {
             action()
         } label: {
             Image(systemName: systemImage)
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(isActive ? tint : .white)
+                .font(.system(size: 17, weight: .medium))
+                .foregroundStyle(isActive ? tint : .white.opacity(0.92))
                 .frame(width: Theme.controlSize, height: Theme.controlSize)
-                .background(.ultraThinMaterial, in: .circle)
-                .overlay {
-                    Circle().strokeBorder(.white.opacity(isActive ? 0.45 : 0.15),
-                                          lineWidth: isActive ? 1 : 0.5)
+                .background {
+                    Circle().fill(.ultraThinMaterial)
+                    Circle().fill(tint.opacity(isActive ? 0.22 : 0.08))   // near-transparent accent wash
                 }
+                .overlay {
+                    Circle().strokeBorder(tint.opacity(isActive ? 0.9 : 0.45), lineWidth: 1)
+                }
+                .shadow(color: tint.opacity(isActive ? 0.6 : 0.3), radius: isActive ? 11 : 6)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(label)
@@ -47,11 +50,18 @@ struct CircleIconButton: View {
 #Preview {
     ZStack {
         Color.black
-        HStack(spacing: 12) {
-            CircleIconButton(label: "Menu", systemImage: "square.grid.2x2") {}
-            CircleIconButton(label: "Free flight", systemImage: "airplane",
-                             tint: .green, isActive: true) {}
+        VStack(spacing: 24) {
+            HStack(spacing: 12) {
+                CircleIconButton(label: "Menu", systemImage: "square.grid.2x2") {}
+                CircleIconButton(label: "Free flight", systemImage: "airplane",
+                                 tint: .green, isActive: true) {}
+            }
+            Button { } label: { Label("Fly here", systemImage: "paperplane.fill") }
+                .buttonStyle(LuminousButtonStyle())
+            Button("Open Settings") { }
+                .buttonStyle(LuminousButtonStyle(tint: .cyan))
         }
+        .padding()
     }
     .ignoresSafeArea()
 }
