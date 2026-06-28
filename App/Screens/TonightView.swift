@@ -32,6 +32,7 @@ struct TonightView: View {
                         sunCard
                         planetSection
                     }
+                    meteorSection   // calendar-based; shown regardless of location
                 }
                 .padding()
                 .padding(.bottom, 40)
@@ -116,6 +117,35 @@ struct TonightView: View {
             VStack(spacing: 0) { ForEach(down) { planetRow($0, up: false) } }
                 .luminousSurface(Color(white: 0.6))
         }
+    }
+
+    @ViewBuilder
+    private var meteorSection: some View {
+        let active = MeteorShowers.active(on: asOf)
+        sectionLabel("Meteor showers", "sparkles")
+        if active.isEmpty {
+            if let next = MeteorShowers.nextUpcoming(after: asOf) {
+                VStack(spacing: 0) { showerRow(next) }.luminousSurface(.pink)
+            }
+        } else {
+            VStack(spacing: 0) { ForEach(active) { showerRow($0) } }.luminousSurface(.pink)
+        }
+    }
+
+    private func showerRow(_ shower: MeteorShower) -> some View {
+        let days = MeteorShowers.daysUntilPeak(shower, from: asOf)
+        let when = days == 0 ? "peaks tonight" : days == 1 ? "peaks tomorrow" : "peaks in \(days) days"
+        return HStack(alignment: .firstTextBaseline) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(shower.name).foregroundStyle(.white)
+                Text("from \(shower.radiantConstellation) · up to \(shower.zhr)/hr at peak")
+                    .font(.caption).foregroundStyle(.white.opacity(0.55))
+            }
+            Spacer()
+            Text(when).font(.subheadline).foregroundStyle(.white.opacity(0.75))
+        }
+        .padding(.horizontal, 14).padding(.vertical, 11)
+        .overlay(Divider().background(.white.opacity(0.08)), alignment: .bottom)
     }
 
     private func sectionLabel(_ text: String, _ symbol: String) -> some View {
