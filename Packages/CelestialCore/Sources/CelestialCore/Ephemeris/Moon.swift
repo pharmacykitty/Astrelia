@@ -79,6 +79,54 @@ public enum Moon {
         )
     }
 
+    /// **Topocentric** equatorial coordinates of the Moon — the geocentric RA/Dec
+    /// corrected for the observer's position on the surface of the Earth (lunar
+    /// parallax). See Meeus, ch. 40. Because the Moon is so close, parallax
+    /// displaces it toward the horizon by up to ~1° (its equatorial horizontal
+    /// parallax), the single largest position error for a surface observer.
+    ///
+    /// Uses **mean** sidereal time and the mean equinox, consistent with the rest
+    /// of the engine (nutation is not yet modelled — a sub-arcminute effect, far
+    /// below the parallax it corrects). The observer's `altitude` (metres above
+    /// sea level) and the Earth's flattening are both accounted for.
+    public static func topocentric(at jd: JulianDay, observer: GeographicLocation) -> EquatorialCoordinates {
+        let geo = geocentric(at: jd)
+        let equatorial = CoordinateTransform.equatorial(
+            fromEcliptic: geo.ecliptic,
+            obliquity: Earth.meanObliquity(at: jd)
+        )
+
+        // Equatorial horizontal parallax (Meeus eq. 40.1): sin π = 6378.14 / Δ,
+        // with Δ the Earth–Moon distance in kilometres.
+        let sinPi = 6378.14 / geo.distanceKm
+
+        // Observer's geocentric quantities ρ·sin φ′ and ρ·cos φ′, corrected for the
+        // Earth's flattening and the observer's height (Meeus ch. 11).
+        let phi = observer.latitude.radians
+        let heightOverRadius = observer.altitude / 6_378_140.0
+        let u = atan(0.99664719 * tan(phi))
+        let rhoSinPhiPrime = 0.99664719 * sin(u) + heightOverRadius * sin(phi)
+        let rhoCosPhiPrime = cos(u) + heightOverRadius * cos(phi)
+
+        // Local hour angle H = LST − α (mean sidereal time; east-positive longitude).
+        let lst = SiderealTime.localMean(at: jd, longitude: observer.longitude)
+        let hourAngle = (lst - equatorial.rightAscension).radians
+
+        let cosDec = equatorial.declination.cosine
+        let sinDec = equatorial.declination.sine
+
+        // Meeus eq. 40.2 / 40.3.
+        let denominator = cosDec - rhoCosPhiPrime * sinPi * cos(hourAngle)
+        let deltaAlpha = atan2(-rhoCosPhiPrime * sinPi * sin(hourAngle), denominator)
+        let rightAscension = (equatorial.rightAscension + .radians(deltaAlpha)).normalized
+        let declination = atan2((sinDec - rhoSinPhiPrime * sinPi) * cos(deltaAlpha), denominator)
+
+        return EquatorialCoordinates(
+            rightAscension: rightAscension,
+            declination: .radians(declination)
+        )
+    }
+
     /// Illumination and waxing/waning state of the Moon (Meeus, ch. 48).
     public static func phase(at jd: JulianDay) -> MoonPhase {
         let t = jd.julianCenturiesSinceJ2000
