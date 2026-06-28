@@ -97,34 +97,51 @@ struct GalaxyMapView: View {
     // MARK: Rendering
 
     private func draw(in context: GraphicsContext, size: CGSize, viewProjection: simd_float4x4) {
-        // Stylized Milky Way: drawn into a blurred, additively-blended layer so the
-        // points melt into luminous arms, bar and bulge instead of reading as dots.
+        // Stylized Milky Way: batched into a blurred, additive layer. Points are
+        // grouped by colour and a coarse opacity level, so we issue ~16 fills
+        // instead of thousands. Off-screen and sub-pixel points are culled.
         context.drawLayer { layer in
-            layer.addFilter(.blur(radius: 3.5))
+            layer.addFilter(.blur(radius: 2.5))
             layer.blendMode = .plusLighter
+            var paths = Array(repeating: Array(repeating: Path(), count: backdropOpacityLevels.count),
+                              count: backdropPalette.count)
             for point in backdrop {
                 guard let (p, depth) = project(point.position, viewProjection, size) else { continue }
-                if p.x < -6 || p.x > size.width + 6 || p.y < -6 || p.y > size.height + 6 { continue }
-                let perspective = min(3.2, max(0.8, Double(900 / depth)))
-                let radius = point.size * CGFloat(perspective)
-                layer.fill(
-                    Path(ellipseIn: CGRect(x: p.x - radius, y: p.y - radius, width: radius * 2, height: radius * 2)),
-                    with: .color(point.color.opacity(point.baseOpacity))
-                )
+                if p.x < -4 || p.x > size.width + 4 || p.y < -4 || p.y > size.height + 4 { continue }
+                let r = point.size * CGFloat(min(3.2, max(0.8, Double(900 / depth))))
+                if r < 0.45 { continue }
+                let o = point.baseOpacity
+                let lvl = o < 0.2 ? 0 : (o < 0.39 ? 1 : (o < 0.62 ? 2 : 3))
+                paths[point.colorBucket][lvl].addEllipse(in: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2))
+            }
+            for c in backdropPalette.indices {
+                for l in backdropOpacityLevels.indices {
+                    layer.fill(paths[c][l], with: .color(backdropPalette[c].opacity(backdropOpacityLevels[l])))
+                }
             }
         }
 
+        // Real stars: one path per colour bucket → 6 fills total, with off-screen +
+        // sub-pixel culling and an overall cap for level-of-detail.
+        var starPaths = Array(repeating: Path(), count: starPalette.count)
+        var glowPath = Path()
+        var drawn = 0
         for star in stars {
-            guard let (point, depth) = project(star.position, viewProjection, size) else { continue }
-            if point.x < -4 || point.x > size.width + 4 || point.y < -4 || point.y > size.height + 4 { continue }
-
-            let perspective = min(3.0, max(0.4, 150 / depth))
-            let radius = max(0.5, star.baseSize * CGFloat(perspective))
-            let opacity = min(1.0, max(0.2, Double(320 / depth)))
-            context.fill(
-                Path(ellipseIn: CGRect(x: point.x - radius, y: point.y - radius, width: radius * 2, height: radius * 2)),
-                with: .color(star.color.opacity(opacity))
-            )
+            guard let (p, depth) = project(star.position, viewProjection, size) else { continue }
+            if p.x < -3 || p.x > size.width + 3 || p.y < -3 || p.y > size.height + 3 { continue }
+            let r = star.baseSize * CGFloat(min(3.0, max(0.4, 150 / depth)))
+            if r < 0.5 { continue }
+            if star.magnitude < 1.5 {
+                let g = r * 3
+                glowPath.addEllipse(in: CGRect(x: p.x - g, y: p.y - g, width: g * 2, height: g * 2))
+            }
+            starPaths[star.colorBucket].addEllipse(in: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2))
+            drawn += 1
+            if drawn >= 14000 { break }
+        }
+        context.fill(glowPath, with: .color(.white.opacity(0.12)))
+        for i in starPalette.indices {
+            context.fill(starPaths[i], with: .color(starPalette[i].opacity(0.95)))
         }
 
         // The Sun at the origin.
@@ -461,7 +478,7 @@ struct GalaxyMapView: View {
             result.append(GalaxyStar(
                 id: star.id,
                 position: position,
-                color: starColor(star.colorIndex),
+                colorBucket: starBucket(star.colorIndex),
                 baseSize: max(0.6, CGFloat(7 - absoluteMagnitude) * 0.32),
                 magnitude: star.apparentMagnitude,
                 distanceParsecs: parsecs,
@@ -469,6 +486,8 @@ struct GalaxyMapView: View {
                 constellation: star.constellation
             ))
         }
+        // Brightest (largest) first, so the level-of-detail cap keeps the prominent ones.
+        result.sort { $0.baseSize > $1.baseSize }
         stars = result
     }
 
@@ -495,10 +514,7 @@ struct GalaxyMapView: View {
             centre + x * axisA + y * axisB + h * up
         }
 
-        let armColor = Color(red: 0.72, green: 0.82, blue: 1.0)   // bluish young arm stars
-        let hiiColor = Color(red: 1.0, green: 0.48, blue: 0.60)   // pink star-forming knots
-        let discColor = Color(red: 0.60, green: 0.70, blue: 0.95) // bluish diffuse haze
-        let bulgeColor = Color(red: 1.0, green: 0.86, blue: 0.58) // warm central bar/bulge
+        let armBucket = 0, hiiBucket = 1, discBucket = 2, bulgeBucket = 3
 
         let rMax: Float = 15000
         let rInner: Float = 2400   // arms emanate from the ends of the bar
@@ -511,23 +527,24 @@ struct GalaxyMapView: View {
         var points: [BackdropPoint] = []
 
         // Two major arms (from the bar ends) + two minor arms, like the real galaxy.
+        // Counts are kept modest (and brighter per point) for rendering performance.
         for armIndex in 0..<arms {
             let offset = Float(armIndex) * (.pi / 2)
             let major = (armIndex % 2 == 0)
-            let starCount = major ? 2600 : 1400
-            let knotCount = major ? 140 : 70
+            let starCount = major ? 1500 : 800
+            let knotCount = major ? 90 : 45
             let weight: Float = major ? 1.0 : 0.6
             for _ in 0..<starCount {
                 let r = rInner + rand(0, 1) * (rMax - rInner)
                 let rr = r + gaussian() * (r * 0.05 + 220)
                 let angle = spiralAngle(r) + offset + gaussian() * 0.09
                 let h = gaussian() * (120 + r * 0.010)
-                let bright = max(0.07, 0.40 - 0.26 * (r / rMax)) * weight
+                let bright = max(0.09, 0.52 - 0.30 * (r / rMax)) * weight
                 points.append(BackdropPoint(
                     position: place(cos(angle) * rr, sin(angle) * rr, h),
+                    colorBucket: armBucket,
                     baseOpacity: Double(bright) * Double(rand(0.5, 1)),
-                    size: CGFloat(rand(0.7, 1.8)),
-                    color: armColor))
+                    size: CGFloat(rand(0.8, 2.0))))
             }
             // Pink HII regions studding the arms — the iconic star-forming knots.
             for _ in 0..<knotCount {
@@ -536,51 +553,51 @@ struct GalaxyMapView: View {
                 let cx = cos(angle) * r, cy = sin(angle) * r
                 points.append(BackdropPoint(
                     position: place(cx + gaussian() * 170, cy + gaussian() * 170, gaussian() * 110),
-                    baseOpacity: Double(rand(0.25, 0.55)) * Double(weight),
-                    size: CGFloat(rand(0.9, 2.0)),
-                    color: hiiColor))
+                    colorBucket: hiiBucket,
+                    baseOpacity: Double(rand(0.3, 0.65)) * Double(weight),
+                    size: CGFloat(rand(1.0, 2.2))))
             }
         }
 
         // Diffuse disc, exponential falloff — fills between the arms with a faint haze.
-        for _ in 0..<3000 {
+        for _ in 0..<1800 {
             let r = sqrt(rand(0, 1)) * rMax
             let angle = rand(0, 2 * .pi)
             let h = gaussian() * (110 + r * 0.010)
-            let bright = max(0.02, 0.11 * exp(-r / 8000))
+            let bright = max(0.03, 0.16 * exp(-r / 8000))
             points.append(BackdropPoint(
                 position: place(cos(angle) * r, sin(angle) * r, h),
+                colorBucket: discBucket,
                 baseOpacity: Double(bright) * Double(rand(0.4, 1)),
-                size: CGFloat(rand(0.5, 1.2)),
-                color: discColor))
+                size: CGFloat(rand(0.6, 1.4))))
         }
 
         // Central bar + bulge — warm, bright, elongated (the Milky Way is a barred spiral).
-        for _ in 0..<2600 {
+        for _ in 0..<1700 {
             let x = gaussian() * 2700      // elongated along axisA → the bar
             let y = gaussian() * 1050
             let z = gaussian() * 650
             let d = (x * x / (2700 * 2700) + y * y / (1050 * 1050) + z * z / (650 * 650)).squareRoot()
-            let opacity = min(0.8, max(0.1, 0.8 - Double(d) * 0.66))
+            let opacity = min(0.85, max(0.12, 0.85 - Double(d) * 0.66))
             points.append(BackdropPoint(
                 position: place(x, y, z),
+                colorBucket: bulgeBucket,
                 baseOpacity: opacity * Double(rand(0.6, 1)),
-                size: CGFloat(rand(0.8, 1.9)),
-                color: bulgeColor))
+                size: CGFloat(rand(0.9, 2.1))))
         }
 
         backdrop = points
     }
 
-    private func starColor(_ colorIndex: Double?) -> Color {
-        guard let ci = colorIndex else { return .white }
+    private func starBucket(_ colorIndex: Double?) -> Int {
+        guard let ci = colorIndex else { return 2 }
         switch ci {
-        case ..<0.0: return Color(red: 0.70, green: 0.80, blue: 1.0)
-        case ..<0.3: return Color(red: 0.86, green: 0.91, blue: 1.0)
-        case ..<0.6: return .white
-        case ..<1.0: return Color(red: 1.0, green: 0.95, blue: 0.84)
-        case ..<1.5: return Color(red: 1.0, green: 0.85, blue: 0.65)
-        default:     return Color(red: 1.0, green: 0.76, blue: 0.60)
+        case ..<0.0: return 0
+        case ..<0.3: return 1
+        case ..<0.6: return 2
+        case ..<1.0: return 3
+        case ..<1.5: return 4
+        default:     return 5
         }
     }
 }
@@ -588,13 +605,32 @@ struct GalaxyMapView: View {
 private struct GalaxyStar: Identifiable {
     let id: Int
     let position: SIMD3<Float>      // parsecs, equatorial, Sun at origin
-    let color: Color
+    let colorBucket: Int           // index into starPalette
     let baseSize: CGFloat
     let magnitude: Double
     let distanceParsecs: Double
     let name: String
     let constellation: String?
 }
+
+/// Discrete palettes let us batch thousands of points into a handful of fills.
+private let starPalette: [Color] = [
+    Color(red: 0.70, green: 0.80, blue: 1.0),    // 0 hot blue
+    Color(red: 0.86, green: 0.91, blue: 1.0),    // 1 blue-white
+    .white,                                       // 2
+    Color(red: 1.0, green: 0.95, blue: 0.84),    // 3 yellow-white
+    Color(red: 1.0, green: 0.85, blue: 0.65),    // 4 orange
+    Color(red: 1.0, green: 0.76, blue: 0.60),    // 5 red
+]
+
+private let backdropPalette: [Color] = [
+    Color(red: 0.72, green: 0.82, blue: 1.0),    // 0 arm
+    Color(red: 1.0, green: 0.48, blue: 0.60),    // 1 HII knot
+    Color(red: 0.60, green: 0.70, blue: 0.95),   // 2 disc haze
+    Color(red: 1.0, green: 0.85, blue: 0.55),    // 3 bar/bulge
+]
+
+private let backdropOpacityLevels: [Double] = [0.12, 0.28, 0.5, 0.75]
 
 /// A spring-centred vertical throttle for free-fly: drag up to fly forward, down
 /// to reverse; releases back to zero. Bound value is -1…1.
@@ -639,9 +675,9 @@ private struct ThrottleControl: View {
 /// A faint, non-interactive point making up the stylized Milky Way backdrop.
 private struct BackdropPoint {
     let position: SIMD3<Float>
+    let colorBucket: Int           // index into backdropPalette
     let baseOpacity: Double
     let size: CGFloat
-    let color: Color
 }
 
 // MARK: - Galactic frame (equatorial coordinates, parsecs, Sun at origin)
