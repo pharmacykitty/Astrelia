@@ -1,8 +1,9 @@
 import Foundation
 import CelestialCore
 
-/// Loads the bundled HYG star catalog (naked-eye subset, mag ≤ 6.5) once, off the
-/// main thread, and hands it to the UI.
+/// Loads the bundled HYG star catalog (mag ≤ 7.5, ~25k distance-known stars) once,
+/// off the main thread, and hands it to the UI. The sky view filters this down by
+/// magnitude; the Galaxy Map uses the full set for 3D depth.
 @MainActor
 @Observable
 final class StarCatalogStore {
@@ -25,7 +26,7 @@ final class StarCatalogStore {
     }
 
     private nonisolated static func loadBundledStars() -> [Star] {
-        guard let url = Bundle.main.url(forResource: "hyg_naked_eye", withExtension: "csv"),
+        guard let url = Bundle.main.url(forResource: "hyg_stars", withExtension: "csv"),
               let data = try? Data(contentsOf: url),
               let stars = try? HYGCatalog.parse(csv: data) else {
             return []

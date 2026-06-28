@@ -31,7 +31,7 @@ struct FilterSheet: View {
                                 .foregroundStyle(.secondary)
                                 .monospacedDigit()
                         }
-                        Slider(value: $filters.magnitudeLimit, in: 1...6.5, step: 0.5)
+                        Slider(value: $filters.magnitudeLimit, in: 1...7.5, step: 0.5)
                         Text(countLabel)
                             .font(.caption)
                             .foregroundStyle(.secondary)

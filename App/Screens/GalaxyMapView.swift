@@ -296,10 +296,15 @@ struct GalaxyMapView: View {
         result.reserveCapacity(catalog.count)
         for star in catalog.stars {
             guard let parsecs = star.distanceParsecs, parsecs > 0, parsecs < 100_000 else { continue }
-            let ra = Float(star.equatorial.rightAscension.radians)
-            let dec = Float(star.equatorial.declination.radians)
-            let d = Float(parsecs)
-            let position = SIMD3<Float>(d * cos(dec) * cos(ra), d * cos(dec) * sin(ra), d * sin(dec))
+            let position: SIMD3<Float>
+            if let p = star.position {
+                position = SIMD3(Float(p.x), Float(p.y), Float(p.z))   // real HYG XYZ (parsecs)
+            } else {
+                let ra = Float(star.equatorial.rightAscension.radians)
+                let dec = Float(star.equatorial.declination.radians)
+                let d = Float(parsecs)
+                position = SIMD3(d * cos(dec) * cos(ra), d * cos(dec) * sin(ra), d * sin(dec))
+            }
             let absoluteMagnitude = star.apparentMagnitude - 5 * (log10(parsecs) - 1)
             result.append(GalaxyStar(
                 id: star.id,
