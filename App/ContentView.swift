@@ -1,6 +1,7 @@
 import SwiftUI
 import UIKit
 import ARKit
+import AVFoundation
 import simd
 import CelestialCore
 
@@ -82,7 +83,13 @@ struct ContentView: View {
         }
         .ignoresSafeArea()
         .statusBarHidden()
-        .onAppear { provider.start(); store.loadIfNeeded() }
+        .onAppear {
+            provider.start()
+            store.loadIfNeeded()
+            // The full-screen menu makes this view disappear (pausing the sensors);
+            // on return, resume the AR session too if we're in AR mode.
+            if mode == .ar { arController.start() }
+        }
         .onDisappear { provider.stop(); arController.stop() }
         .onChange(of: mode) { _, newMode in
             if newMode == .ar {
@@ -235,8 +242,17 @@ struct ContentView: View {
         if mode == .virtual && provider.rotationMatrix == nil {
             return SkyStatus(symbol: "gyroscope", message: "Calibrating motion sensors…", showSettings: false)
         }
-        if mode == .ar && arController.currentFrame == nil {
-            return SkyStatus(symbol: "camera.viewfinder", message: "Starting AR camera…", showSettings: false)
+        if mode == .ar {
+            switch AVCaptureDevice.authorizationStatus(for: .video) {
+            case .denied, .restricted:
+                return SkyStatus(symbol: "video.slash",
+                                 message: "Camera access is needed for AR mode.\nEnable it in Settings.",
+                                 showSettings: true)
+            default: break
+            }
+            if arController.currentFrame == nil {
+                return SkyStatus(symbol: "camera.viewfinder", message: "Starting AR camera…", showSettings: false)
+            }
         }
         return nil
     }
