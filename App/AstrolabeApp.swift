@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import CelestialCore
 
 @main
 struct AstrolabeApp: App {
@@ -13,6 +14,12 @@ struct AstrolabeApp: App {
             } else if ProcessInfo.processInfo.arguments.contains("-snapshotStar") {
                 NavigationStack { StarSnapshotHarness() }
                     .preferredColorScheme(.dark)
+            } else if ProcessInfo.processInfo.arguments.contains("-snapshotTonight") {
+                NavigationStack {
+                    TonightView(fixedLocation: GeographicLocation(latitude: .degrees(40.71),
+                                                                  longitude: .degrees(-74.0)))
+                }
+                .preferredColorScheme(.dark)
             } else if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-snapshotPlanet") {
                 let args = ProcessInfo.processInfo.arguments
                 let name = (i + 1 < args.count && !args[i + 1].hasPrefix("-")) ? args[i + 1] : "Earth"

@@ -15,7 +15,7 @@ struct MoreMenuView: View {
                 ScrollView {
                     VStack(spacing: 30) {
                         header
-                        section("Explore", [.catalog, .constellations, .galaxyMap])
+                        section("Explore", [.tonight, .catalog, .constellations, .galaxyMap])
                         section("Interpret", [.astrology])
                         section(nil, [.about])
                     }
@@ -77,6 +77,7 @@ struct MoreMenuView: View {
     @ViewBuilder
     private func destination(_ screen: AppScreen) -> some View {
         switch screen {
+        case .tonight: TonightView()
         case .catalog: CatalogView(store: store, exo: exo)
         case .constellations: ConstellationsView(store: store)
         case .galaxyMap: GalaxyMapView(store: store, exo: exo)
@@ -194,10 +195,11 @@ struct SeededGenerator: RandomNumberGenerator {
 
 /// The future top-level screens. Real content arrives later.
 enum AppScreen: Hashable, CaseIterable {
-    case catalog, constellations, galaxyMap, astrology, about
+    case tonight, catalog, constellations, galaxyMap, astrology, about
 
     var title: String {
         switch self {
+        case .tonight: "Tonight"
         case .catalog: "Catalog"
         case .constellations: "Constellations"
         case .galaxyMap: "Galaxy Map"
@@ -208,6 +210,7 @@ enum AppScreen: Hashable, CaseIterable {
 
     var subtitle: String {
         switch self {
+        case .tonight: "What's up in your sky right now"
         case .catalog: "Search stars, planets & deep-sky objects"
         case .constellations: "The 88, plus asterisms, lost & cultural figures"
         case .galaxyMap: "Fly through the galaxy in 3D"
@@ -218,6 +221,7 @@ enum AppScreen: Hashable, CaseIterable {
 
     var symbol: String {
         switch self {
+        case .tonight: "sparkles"
         case .catalog: "binoculars.fill"
         case .constellations: "point.3.connected.trianglepath.dotted"
         case .galaxyMap: "globe.americas.fill"
@@ -229,6 +233,7 @@ enum AppScreen: Hashable, CaseIterable {
     /// A large, faint sky-figure drawn behind each menu card (Proposal C motif).
     var watermark: String {
         switch self {
+        case .tonight: "moon.stars.fill"
         case .catalog: "sparkles"
         case .constellations: "point.3.connected.trianglepath.dotted"
         case .galaxyMap: "hurricane"
@@ -239,6 +244,7 @@ enum AppScreen: Hashable, CaseIterable {
 
     var tint: Color {
         switch self {
+        case .tonight: .indigo
         case .catalog: .cyan
         case .constellations: Theme.accent
         case .galaxyMap: .purple
@@ -249,6 +255,7 @@ enum AppScreen: Hashable, CaseIterable {
 
     var gradient: [Color] {
         switch self {
+        case .tonight: [Color(red: 0.45, green: 0.5, blue: 0.95), Color(red: 0.25, green: 0.25, blue: 0.6)]
         case .catalog: [Color(red: 0.2, green: 0.8, blue: 0.95), Color(red: 0.1, green: 0.45, blue: 0.9)]
         case .constellations: [Color(red: 0.56, green: 0.72, blue: 1.0), Color(red: 0.32, green: 0.45, blue: 0.85)]
         case .galaxyMap: [Color(red: 0.6, green: 0.35, blue: 0.95), Color(red: 0.35, green: 0.2, blue: 0.7)]
