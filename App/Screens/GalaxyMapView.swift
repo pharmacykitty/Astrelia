@@ -23,7 +23,20 @@ struct GalaxyMapView: View {
 
     @State private var dragPrevious: CGSize = .zero
     @State private var zoomAnchor: Float = 220
-    @State private var selection: GalaxyStar?
+    @State private var selection: MapSelection?
+
+    /// What the user has tapped — a real star or a curated landmark.
+    private enum MapSelection {
+        case star(GalaxyStar)
+        case landmark(Landmark)
+
+        var position: SIMD3<Float> {
+            switch self {
+            case .star(let s): s.position
+            case .landmark(let l): l.positionParsecs
+            }
+        }
+    }
 
     private let fieldOfView: Float = 0.9   // radians (~51°)
 
@@ -106,17 +119,30 @@ struct GalaxyMapView: View {
                          at: CGPoint(x: sunPoint.x, y: sunPoint.y + 14))
         }
 
-        // Sagittarius A* — the galactic centre.
-        if let (p, depth) = project(Galactic.centerPosition, viewProjection, size), depth > 0 {
-            let glow = Color(red: 1.0, green: 0.9, blue: 0.72)
-            context.fill(Path(ellipseIn: CGRect(x: p.x - 18, y: p.y - 18, width: 36, height: 36)),
-                         with: .color(glow.opacity(0.10)))
-            context.fill(Path(ellipseIn: CGRect(x: p.x - 9, y: p.y - 9, width: 18, height: 18)),
-                         with: .color(glow.opacity(0.22)))
-            context.fill(Path(ellipseIn: CGRect(x: p.x - 3, y: p.y - 3, width: 6, height: 6)),
-                         with: .color(.white))
-            context.draw(Text("Sgr A*").font(.system(size: 10, weight: .semibold)).foregroundStyle(glow),
-                         at: CGPoint(x: p.x, y: p.y + 16))
+        // Deep-sky landmarks — nebulae, clusters, black holes, satellite galaxies.
+        var labelRects: [CGRect] = []
+        for landmark in Landmarks.all {
+            guard let (p, depth) = project(landmark.positionParsecs, viewProjection, size), depth > 0 else { continue }
+            if p.x < -24 || p.x > size.width + 24 || p.y < -24 || p.y > size.height + 24 { continue }
+            let color = landmark.type.color
+            let big = landmark.type == .blackHole || landmark.type == .galaxy
+            let outer: CGFloat = big ? 13 : 9
+            context.fill(Path(ellipseIn: CGRect(x: p.x - outer, y: p.y - outer, width: outer * 2, height: outer * 2)),
+                         with: .color(color.opacity(0.13)))
+            context.fill(Path(ellipseIn: CGRect(x: p.x - 4.5, y: p.y - 4.5, width: 9, height: 9)),
+                         with: .color(color.opacity(0.45)))
+            context.fill(Path(ellipseIn: CGRect(x: p.x - 1.8, y: p.y - 1.8, width: 3.6, height: 3.6)),
+                         with: .color(.white.opacity(0.95)))
+
+            let text = Text(landmark.name).font(.system(size: 9, weight: .medium)).foregroundStyle(color.opacity(0.95))
+            let resolved = context.resolve(text)
+            let m = resolved.measure(in: CGSize(width: 160, height: 40))
+            let rect = CGRect(x: p.x - m.width / 2, y: p.y + 11 - m.height / 2, width: m.width, height: m.height)
+            if rect.minX > 2, rect.maxX < size.width - 2, rect.minY > 2, rect.maxY < size.height - 2,
+               !labelRects.contains(where: { $0.intersects(rect) }) {
+                labelRects.append(rect.insetBy(dx: -3, dy: -3))
+                context.draw(resolved, at: CGPoint(x: p.x, y: p.y + 11))
+            }
         }
 
         // Selection ring + label.
@@ -155,33 +181,55 @@ struct GalaxyMapView: View {
             if let selection {
                 selectionCard(selection)
             } else {
-                Text("Drag to orbit · pinch to zoom · tap a star")
+                Text("Drag to orbit · pinch to zoom · tap a star or landmark")
                     .font(.caption).foregroundStyle(.white.opacity(0.45))
             }
         }
         .padding(.bottom, safeInsets.bottom + 10)
     }
 
-    private func selectionCard(_ star: GalaxyStar) -> some View {
-        let lightYears = star.distanceParsecs * 3.2616
-        return VStack(alignment: .leading, spacing: 6) {
+    @ViewBuilder
+    private func selectionCard(_ selection: MapSelection) -> some View {
+        switch selection {
+        case .star(let star): card(title: star.name, tint: .white, detail: starDetail(star), body: nil) { flyTo(star) }
+        case .landmark(let lm): card(title: lm.name, tint: lm.type.color, detail: landmarkDetail(lm), body: lm.summary) {
+            animateCamera(to: lm.positionParsecs, distance: lm.suggestedViewDistance)
+        }
+        }
+    }
+
+    private func starDetail(_ star: GalaxyStar) -> String {
+        let ly = star.distanceParsecs * 3.2616
+        var s = String(format: "%.1f ly · %.1f pc · mag %.1f", ly, star.distanceParsecs, star.magnitude)
+        if let c = star.constellation { s += " · \(c)" }
+        return s
+    }
+
+    private func landmarkDetail(_ lm: Landmark) -> String {
+        let designation = lm.designation.map { "\($0) · " } ?? ""
+        return "\(designation)\(lm.type.label) · \(formatDistance(lm.distanceLightYears)) ly"
+    }
+
+    private func formatDistance(_ ly: Double) -> String {
+        ly >= 10000 ? String(format: "%.0fk", ly / 1000) : String(format: "%.0f", ly)
+    }
+
+    private func card(title: String, tint: Color, detail: String, body: String?, fly: @escaping () -> Void) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text(star.name).font(.title3.weight(.semibold)).foregroundStyle(.white)
+                Text(title).font(.title3.weight(.semibold)).foregroundStyle(.white)
                 Spacer()
                 Button { selection = nil } label: { Image(systemName: "xmark.circle.fill") }
                     .foregroundStyle(.white.opacity(0.5))
             }
-            Text(String(format: "%.1f ly  ·  %.1f pc  ·  mag %.1f", lightYears, star.distanceParsecs, star.magnitude))
-                .font(.caption.monospacedDigit()).foregroundStyle(.white.opacity(0.7))
-            if let constellation = star.constellation {
-                Text(constellation).font(.caption2).foregroundStyle(.white.opacity(0.5))
+            Text(detail).font(.caption.monospacedDigit()).foregroundStyle(.white.opacity(0.7))
+            if let body {
+                Text(body).font(.caption).foregroundStyle(.white.opacity(0.6)).fixedSize(horizontal: false, vertical: true)
             }
-            Button {
-                flyTo(star)
-            } label: {
+            Button(action: fly) {
                 Label("Fly here", systemImage: "paperplane.fill").font(.subheadline)
             }
-            .buttonStyle(.borderedProminent).tint(.blue)
+            .buttonStyle(.borderedProminent).tint(tint == .white ? .blue : tint)
             .padding(.top, 2)
         }
         .padding(14)
@@ -278,13 +326,24 @@ struct GalaxyMapView: View {
 
     private func tapGesture(size: CGSize, viewProjection: simd_float4x4) -> some Gesture {
         SpatialTapGesture().onEnded { event in
-            var best: (distance: CGFloat, star: GalaxyStar)?
+            // Landmarks first — they're larger, fewer, and easier to mean to tap.
+            var bestLandmark: (distance: CGFloat, landmark: Landmark)?
+            for landmark in Landmarks.all {
+                guard let (point, depth) = project(landmark.positionParsecs, viewProjection, size), depth > 0 else { continue }
+                let d = hypot(point.x - event.location.x, point.y - event.location.y)
+                if d < 26, bestLandmark == nil || d < bestLandmark!.distance { bestLandmark = (d, landmark) }
+            }
+            if let bestLandmark {
+                selection = .landmark(bestLandmark.landmark)
+                return
+            }
+            var bestStar: (distance: CGFloat, star: GalaxyStar)?
             for star in stars {
                 guard let (point, _) = project(star.position, viewProjection, size) else { continue }
                 let d = hypot(point.x - event.location.x, point.y - event.location.y)
-                if d < 24, best == nil || d < best!.distance { best = (d, star) }
+                if d < 22, bestStar == nil || d < bestStar!.distance { bestStar = (d, star) }
             }
-            selection = best?.star
+            selection = bestStar.map { .star($0.star) }
         }
     }
 
