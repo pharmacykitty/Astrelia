@@ -179,6 +179,7 @@ private struct SkyFigureRow: View {
 private struct SkyFigureDetailView: View {
     let figure: SkyFigure
     let store: StarCatalogStore
+    @State private var show3D = false
 
     /// Catalog stars within the figure's patch of sky, brightest first, trimmed to
     /// naked-eye visibility. Region-based (not constellation-keyed) so asterisms
@@ -211,6 +212,7 @@ private struct SkyFigureDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 figureCard
+                view3DButton
                 header
                 factCard
                 Text(figure.blurb)
@@ -222,6 +224,21 @@ private struct SkyFigureDetailView: View {
         .background(Theme.spaceGradient.ignoresSafeArea())
         .navigationTitle(figure.name)
         .navigationBarTitleDisplayMode(.inline)
+        .fullScreenCover(isPresented: $show3D) {
+            Constellation3DView(figure: figure, store: store)
+                .preferredColorScheme(.dark)
+        }
+    }
+
+    /// Launches the rotatable 3D view, where the figure's stars sit at their real
+    /// distances and the flat pattern reveals itself as a line-of-sight illusion.
+    private var view3DButton: some View {
+        Button { show3D = true } label: {
+            Label("View in 3D", systemImage: "rotate.3d")
+                .font(.subheadline.weight(.medium))
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(LuminousButtonStyle(tint: Theme.accent))
     }
 
     private var figureCard: some View {
