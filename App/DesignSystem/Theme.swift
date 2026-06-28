@@ -1,4 +1,21 @@
 import SwiftUI
+import UIKit
+
+extension EdgeInsets {
+    /// The key window's safe-area insets. Full-bleed screens (which `ignoresSafeArea`
+    /// so the sky/galaxy fills the display) read this to keep controls clear of the
+    /// Dynamic Island and home indicator. `GeometryReader.safeAreaInsets` can't be
+    /// used here — it reports zero once the reader itself ignores the safe area.
+    @MainActor static var deviceSafeArea: EdgeInsets {
+        let insets = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .first(where: \.isKeyWindow)?
+            .safeAreaInsets ?? .zero
+        return EdgeInsets(top: insets.top, leading: insets.left,
+                          bottom: insets.bottom, trailing: insets.right)
+    }
+}
 
 /// Shared design constants so the app's chrome stays visually consistent and can
 /// be tuned in one place. Keep this small and intentional — only values that are

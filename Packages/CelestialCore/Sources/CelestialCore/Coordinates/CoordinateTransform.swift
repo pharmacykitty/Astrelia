@@ -93,4 +93,24 @@ public enum CoordinateTransform {
 
         return EquatorialCoordinates(rightAscension: rightAscension, declination: declination)
     }
+
+    /// Equatorial → ecliptic, given the obliquity of the ecliptic (Meeus eq. 13.1/13.2).
+    public static func ecliptic(
+        fromEquatorial equatorial: EquatorialCoordinates,
+        obliquity: Angle
+    ) -> EclipticCoordinates {
+        let alpha = equatorial.rightAscension
+        let delta = equatorial.declination
+        let epsilon = obliquity
+
+        let longitude = Angle.atan2(
+            y: alpha.sine * epsilon.cosine + delta.tangent * epsilon.sine,
+            x: alpha.cosine
+        ).normalized
+        let latitude = Angle.asin(
+            delta.sine * epsilon.cosine - delta.cosine * epsilon.sine * alpha.sine
+        )
+
+        return EclipticCoordinates(longitude: longitude, latitude: latitude)
+    }
 }

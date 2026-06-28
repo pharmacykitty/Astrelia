@@ -27,7 +27,7 @@ public enum Zodiac: Sendable, Hashable {
 ///
 /// v1 ships **Lahiri** (the Indian government standard, most widely used).
 /// Other systems (Krishnamurti/KP, Raman, Fagan–Bradley) slot in as more cases.
-public enum Ayanamsa: Sendable, Hashable {
+public enum Ayanamsa: String, Sendable, Hashable, CaseIterable {
     case lahiri
 
     /// The offset to subtract from a tropical longitude to obtain the sidereal

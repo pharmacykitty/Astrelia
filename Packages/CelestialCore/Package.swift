@@ -13,8 +13,25 @@ let package = Package(
     products: [
         .library(name: "CelestialCore", targets: ["CelestialCore"]),
     ],
+    dependencies: [
+        // SwiftAA (MIT) supplies the planet ephemeris (Mercury–Pluto) via Meeus'
+        // algorithms. We keep "rolled our own" for time/coords/Sun/Moon and use
+        // SwiftAA only as the planetary-position engine, per the roadmap's
+        // "reassess SwiftAA there [planets]" note. No UIKit/SwiftUI; pure compute.
+        .package(url: "https://github.com/onekiloparsec/SwiftAA.git", from: "3.0.1"),
+    ],
     targets: [
-        .target(name: "CelestialCore"),
+        .target(
+            name: "CelestialCore",
+            dependencies: [
+                .product(name: "SwiftAA", package: "SwiftAA"),
+                // AABridge: the C/AA+ layer. SwiftAA's `Pluto` can't return a
+                // geocentric position (its `planetStrict` rejects Pluto), so we
+                // reach the heliocentric Pluto/Earth functions directly and do the
+                // geocentric reduction ourselves.
+                .product(name: "AABridge", package: "SwiftAA"),
+            ]
+        ),
         .testTarget(
             name: "CelestialCoreTests",
             dependencies: ["CelestialCore"]

@@ -1,46 +1,66 @@
 import SwiftUI
 import CelestialCore
 
-/// A searchable catalog of notable things in the galaxy: curated deep-sky
-/// landmarks and the brightest named stars. Tapping an entry opens a detail page
-/// that can launch the Galaxy Map focused on that object.
+/// A searchable catalog of notable things in the galaxy: the brightest named stars,
+/// known planetary systems, and curated deep-sky landmarks. Categories are
+/// collapsible dropdowns for quick navigation; searching expands everything and
+/// filters in place. Tapping an entry opens a detail page that can launch the
+/// Galaxy Map focused on that object.
 struct CatalogView: View {
     let store: StarCatalogStore
     let exo: ExoplanetStore
     @State private var query = ""
-    @State private var namedStars: [Star] = []
+    @State private var allStars: [Star] = []           // every catalog star, brightest first
+    @State private var namedStars: [Star] = []          // the curated "greatest hits"
+    @State private var constellationGroups: [ConstellationGroup] = []
+    /// Which dropdowns are open. Search overrides this to expand all (see `binding`).
+    @State private var expandedKeys: Set<String> = ["notable"]
+
+    /// All catalog stars in one constellation, brightest first.
+    struct ConstellationGroup: Identifiable {
+        let id: String          // constellation code ("CMa"), or "—" when unlisted
+        let name: String        // full name ("Canis Major") or "Unlisted"
+        let stars: [Star]
+    }
 
     var body: some View {
         List {
-            if !filteredLandmarks.isEmpty {
-                Section("Landmarks") {
-                    ForEach(filteredLandmarks) { landmark in
-                        NavigationLink {
-                            LandmarkDetailView(landmark: landmark, store: store, exo: exo)
-                        } label: {
+            if isSearching {
+                let matches = matchingStars
+                disclosure("stars", title: "Stars", systemImage: "sparkle", tint: .yellow,
+                           count: matches.count) {
+                    ForEach(matches, id: \.id) { star in starLink(star) }
+                }
+            } else {
+                disclosure("notable", title: "Notable Stars", systemImage: "star.fill", tint: .yellow,
+                           count: namedStars.count) {
+                    ForEach(namedStars, id: \.id) { star in starLink(star) }
+                }
+                disclosure("constellations", title: "Stars by Constellation", systemImage: "sparkles",
+                           tint: .yellow, count: allStars.count) {
+                    ForEach(constellationGroups) { group in
+                        disclosure("con.\(group.id)", title: group.name, systemImage: "star",
+                                   tint: .yellow.opacity(0.85), count: group.stars.count) {
+                            ForEach(group.stars, id: \.id) { star in starLink(star) }
+                        }
+                    }
+                }
+            }
+
+            disclosure("systems", title: "Planetary Systems", systemImage: "circle.dotted.circle", tint: .cyan,
+                       count: filteredSystems.count) {
+                ForEach(filteredSystems) { system in
+                    NavigationLink { SystemView(system: system) } label: { systemRow(system) }
+                }
+            }
+
+            ForEach(LandmarkGroup.allCases, id: \.self) { group in
+                let items = filteredLandmarks(in: group)
+                disclosure(group.rawValue, title: group.title, systemImage: group.symbol,
+                           tint: group.color, count: items.count) {
+                    ForEach(items) { landmark in
+                        NavigationLink { LandmarkDetailView(landmark: landmark, store: store, exo: exo) } label: {
                             landmarkRow(landmark)
-                        }
-                    }
-                }
-            }
-            if !filteredSystems.isEmpty {
-                Section(query.isEmpty ? "Planetary Systems" : "Systems") {
-                    ForEach(filteredSystems) { system in
-                        NavigationLink {
-                            SystemView(system: system)
-                        } label: {
-                            systemRow(system)
-                        }
-                    }
-                }
-            }
-            if !filteredStars.isEmpty {
-                Section(query.isEmpty ? "Brightest Stars" : "Stars") {
-                    ForEach(filteredStars, id: \.id) { star in
-                        NavigationLink {
-                            StarDetailView(star: star, store: store, exo: exo)
-                        } label: {
-                            starRow(star)
                         }
                     }
                 }
@@ -48,37 +68,118 @@ struct CatalogView: View {
         }
         .navigationTitle("Catalog")
         .navigationBarTitleDisplayMode(.inline)
-        .searchable(text: $query, prompt: "Search stars, planets, nebulae…")
+        .safeAreaInset(edge: .bottom) { searchBar }
         .task(id: store.catalog?.count ?? 0) {
-            guard namedStars.isEmpty, let catalog = store.catalog else { return }
-            namedStars = catalog.stars
-                .filter { $0.properName != nil }
-                .sorted { $0.apparentMagnitude < $1.apparentMagnitude }
+            guard allStars.isEmpty, let catalog = store.catalog else { return }
+            let sorted = catalog.stars.sorted { $0.apparentMagnitude < $1.apparentMagnitude }
+            allStars = sorted
+            namedStars = sorted.filter { $0.properName != nil }
+
+            // Bucket every star by its constellation so the whole catalog is
+            // browsable, not just the named handful. Sorted by full name.
+            var buckets: [String: [Star]] = [:]
+            for star in sorted { buckets[star.constellation ?? "", default: []].append(star) }
+            constellationGroups = buckets.map { code, stars in
+                ConstellationGroup(id: code.isEmpty ? "—" : code,
+                                   name: StarFacts.constellationName(code) ?? (code.isEmpty ? "Unlisted" : code),
+                                   stars: stars)
+            }
+            .sorted { $0.name < $1.name }
         }
     }
 
-    private var filteredLandmarks: [Landmark] {
-        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !q.isEmpty else { return Landmarks.all }
-        return Landmarks.all.filter {
-            $0.name.lowercased().contains(q)
-            || ($0.designation ?? "").lowercased().contains(q)
-            || $0.type.label.lowercased().contains(q)
+    // MARK: Search
+
+    /// A custom search field pinned to the bottom of the screen (so it sits in
+    /// thumb reach), in the app's luminous language and without the system search's
+    /// magnifying-glass affordance.
+    private var searchBar: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "sparkle")
+                .font(.footnote)
+                .foregroundStyle(Theme.accent.opacity(0.8))
+            TextField("Search stars, planets, nebulae…", text: $query)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .submitLabel(.search)
+            if !query.isEmpty {
+                Button {
+                    query = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear search")
+            }
+        }
+        .padding(.horizontal, 16).padding(.vertical, 12)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay(Capsule().strokeBorder(.white.opacity(0.14), lineWidth: 0.5))
+        .padding(.horizontal)
+        .padding(.bottom, 6)
+    }
+
+    // MARK: Dropdown
+
+    /// A collapsible category section. Hidden entirely when it has no matches so a
+    /// search doesn't leave a row of empty headers. Forced open while searching.
+    @ViewBuilder
+    private func disclosure<Content: View>(_ key: String, title: String, systemImage: String,
+                                           tint: Color, count: Int,
+                                           @ViewBuilder content: @escaping () -> Content) -> some View {
+        if count > 0 {
+            DisclosureGroup(isExpanded: binding(key)) {
+                content()
+            } label: {
+                Label {
+                    HStack {
+                        Text(title).font(.headline)
+                        Spacer()
+                        Text("\(count)").font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                } icon: {
+                    Image(systemName: systemImage)
+                        .font(.title2)
+                        .foregroundStyle(tint)
+                        .frame(width: 30)
+                }
+            }
         }
     }
 
-    private var filteredStars: [Star] {
-        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !q.isEmpty else { return Array(namedStars.prefix(150)) }
-        return namedStars.filter {
-            ($0.properName ?? "").lowercased().contains(q)
-            || ($0.bayerFlamsteed ?? "").lowercased().contains(q)
-            || ($0.constellation ?? "").lowercased().contains(q)
+    private func binding(_ key: String) -> Binding<Bool> {
+        Binding(
+            get: { !query.trimmingCharacters(in: .whitespaces).isEmpty || expandedKeys.contains(key) },
+            set: { isOpen in
+                if isOpen { expandedKeys.insert(key) } else { expandedKeys.remove(key) }
+            })
+    }
+
+    // MARK: Filtering
+
+    private var trimmedQuery: String { query.trimmingCharacters(in: .whitespaces).lowercased() }
+    private var isSearching: Bool { !trimmedQuery.isEmpty }
+
+    /// All stars matching the query, brightest first, capped so a broad query (e.g.
+    /// a single constellation) stays snappy to render.
+    private var matchingStars: [Star] {
+        let q = trimmedQuery
+        return Array(allStars.lazy.filter { StarFacts.matches($0, query: q) }.prefix(400))
+    }
+
+    private func filteredLandmarks(in group: LandmarkGroup) -> [Landmark] {
+        let q = trimmedQuery
+        return Landmarks.all.filter { landmark in
+            landmark.type.group == group && (q.isEmpty
+                || landmark.name.lowercased().contains(q)
+                || (landmark.designation ?? "").lowercased().contains(q)
+                || landmark.type.label.lowercased().contains(q))
         }
     }
 
     private var filteredSystems: [PlanetarySystem] {
-        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        let q = trimmedQuery
         guard !q.isEmpty else {
             return Array(exo.systems.sorted { $0.planets.count > $1.planets.count }.prefix(60))
         }
@@ -87,6 +188,8 @@ struct CatalogView: View {
             || $0.planets.contains { $0.name.lowercased().contains(q) }
         }
     }
+
+    // MARK: Rows
 
     private func systemRow(_ system: PlanetarySystem) -> some View {
         Label {
@@ -116,16 +219,25 @@ struct CatalogView: View {
         }
     }
 
+    private func starLink(_ star: Star) -> some View {
+        NavigationLink { StarDetailView(star: star, store: store, exo: exo) } label: { starRow(star) }
+    }
+
     private func starRow(_ star: Star) -> some View {
-        Label {
+        let title = StarFacts.displayName(for: star)
+        let subtitle = [
+            star.bayerFlamsteed == title ? nil : star.bayerFlamsteed,
+            StarFacts.constellationName(star.constellation) ?? star.constellation,
+            String(format: "mag %.1f", star.apparentMagnitude),
+        ].compactMap { $0 }.joined(separator: " · ")
+        return Label {
             VStack(alignment: .leading, spacing: 2) {
-                Text(star.properName ?? "Star \(star.id)")
-                Text([star.bayerFlamsteed, star.constellation, String(format: "mag %.1f", star.apparentMagnitude)]
-                        .compactMap { $0 }.joined(separator: " · "))
-                    .font(.caption).foregroundStyle(.secondary)
+                Text(title)
+                Text(subtitle).font(.caption).foregroundStyle(.secondary)
             }
         } icon: {
-            Image(systemName: "sparkle").foregroundStyle(.yellow)
+            Image(systemName: star.properName != nil ? "sparkle" : "star")
+                .foregroundStyle(.yellow)
         }
     }
 }
@@ -162,21 +274,57 @@ private struct StarDetailView: View {
     let store: StarCatalogStore
     let exo: ExoplanetStore
 
+    private var temperature: Double? { StarFacts.temperatureKelvin(colorIndex: star.colorIndex) }
+    private var summary: String? { StarFacts.summary(for: star.properName) }
+    private var spectral: String? { StarFacts.spectralDescription(star.spectralType) }
+    private var radiusSolar: Double? { StarFacts.radiusSolar(for: star) }
+    private var facts: [String] { StarFacts.relatableFacts(for: star) }
+
     var body: some View {
-        DetailScaffold(symbol: "sparkle", tint: .yellow, title: star.properName ?? "Star \(star.id)",
-                       subtitle: [star.bayerFlamsteed, star.constellation].compactMap { $0 }.joined(separator: " · ")) {
+        DetailScaffold(symbol: "sparkle", tint: .yellow, title: StarFacts.displayName(for: star),
+                       subtitle: [star.bayerFlamsteed == StarFacts.displayName(for: star) ? nil : star.bayerFlamsteed,
+                                  StarFacts.constellationName(star.constellation)]
+                        .compactMap { $0 }.joined(separator: " · ")) {
             if let pc = star.distanceParsecs {
                 DetailRow("Distance", String(format: "%.1f ly · %.1f pc", pc * 3.2616, pc))
             }
             DetailRow("Apparent magnitude", String(format: "%.2f", star.apparentMagnitude))
             if let abs = star.absoluteMagnitude { DetailRow("Absolute magnitude", String(format: "%.2f", abs)) }
             if let spect = star.spectralType { DetailRow("Spectral type", spect) }
+            if let t = temperature { DetailRow("Surface temperature", String(format: "≈ %.0f K", t)) }
+            if let l = star.luminosity { DetailRow("Luminosity", String(format: "%@ L☉", luminosityString(l))) }
+            if let r = radiusSolar { DetailRow("Radius (derived)", String(format: "≈ %@ R☉", luminosityString(r))) }
+            if let bv = star.colorIndex { DetailRow("Colour index (B−V)", String(format: "%.2f", bv)) }
+            if let con = StarFacts.constellationName(star.constellation) { DetailRow("Constellation", con) }
             if let hip = star.hipparcos { DetailRow("Hipparcos", "HIP \(hip)") }
+            if let hd = star.henryDraper { DetailRow("Henry Draper", "HD \(hd)") }
+            if let hr = star.harvardRevised { DetailRow("Bright Star", "HR \(hr)") }
+            if let gl = star.gliese { DetailRow("Gliese", gl) }
         } description: {
-            EmptyView()
+            VStack(alignment: .leading, spacing: 10) {
+                if let summary { Text(summary) }
+                if let spectral {
+                    Label(spectral, systemImage: "thermometer.medium")
+                        .font(.subheadline).foregroundStyle(.white.opacity(0.7))
+                }
+                if !facts.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(facts, id: \.self) { fact in
+                            Label(fact, systemImage: "sparkle")
+                                .font(.subheadline).foregroundStyle(.white.opacity(0.75))
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .padding(.top, 2)
+                }
+            }
         } action: {
             if star.distanceParsecs != nil { GalaxyMapView(store: store, exo: exo, focus: .star(star.id)) }
         }
+    }
+
+    private func luminosityString(_ l: Double) -> String {
+        l >= 100 ? String(format: "%.0f", l) : String(format: "%.2f", l)
     }
 }
 

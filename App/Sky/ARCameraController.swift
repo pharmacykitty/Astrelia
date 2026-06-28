@@ -7,9 +7,9 @@ import AVFoundation
 ///
 /// We deliberately do NOT use `ARView`/`ARSCNView` for the passthrough: both rendered
 /// a black background here even with a healthy session delivering frames. Instead we
-/// run a bare `ARSession` for the pose and draw the camera image ourselves as a plain
-/// SwiftUI `Image` (see `ARCameraView`) — the same rendering path that already draws
-/// the star overlay reliably.
+/// run a bare `ARSession` for the pose and `currentCameraImage()` hands the live frame
+/// to `ContentView`, which draws it as a plain SwiftUI `Image` inside the same
+/// `TimelineView` as the star overlay — the rendering path that actually composites.
 ///
 /// Uses `.gravity` (NOT `.gravityAndHeading`) world alignment on purpose: gravity
 /// fixes the vertical, but heading is tracked purely by visual-inertial odometry —
@@ -70,58 +70,5 @@ final class ARCameraController {
         guard let pixelBuffer = session.currentFrame?.capturedImage else { return nil }
         let image = CIImage(cvPixelBuffer: pixelBuffer).oriented(.right)
         return ciContext.createCGImage(image, from: image.extent)
-    }
-}
-
-/// Draws the live camera image as the SwiftUI background for AR mode, aspect-filled
-/// to the screen. Rebuilt each frame so the feed stays live.
-struct ARCameraView: View {
-    let controller: ARCameraController
-
-    var body: some View {
-        GeometryReader { geometry in
-            TimelineView(.animation) { _ in
-                let frame = controller.currentFrame
-                let image = controller.currentCameraImage()
-                ZStack {
-                    Color.black
-                    if let image {
-                        Image(decorative: image, scale: 1)
-                            .resizable()
-                            .scaledToFill()
-                            .frame(width: geometry.size.width, height: geometry.size.height)
-                            .clipped()
-                    }
-                    // DIAGNOSTIC HUD — remove once the camera shows.
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("AR running: \(controller.isRunning ? "yes" : "no")")
-                        Text("frame: \(frame != nil ? "yes" : "no")")
-                        if let buffer = frame?.capturedImage {
-                            Text("buf: \(CVPixelBufferGetWidth(buffer))×\(CVPixelBufferGetHeight(buffer))")
-                        } else {
-                            Text("buf: none")
-                        }
-                        Text("cgimage: \(image != nil ? "yes" : "no")")
-                        Text("tracking: \(trackingDescription(frame?.camera.trackingState))")
-                    }
-                    .font(.system(size: 14, weight: .bold, design: .monospaced))
-                    .foregroundStyle(.green)
-                    .padding(8)
-                    .background(.black.opacity(0.6))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .padding(.top, 140)
-                    .padding(.leading, 16)
-                }
-            }
-        }
-    }
-
-    private func trackingDescription(_ state: ARCamera.TrackingState?) -> String {
-        switch state {
-        case .normal: return "normal"
-        case .limited(let reason): return "limited(\(reason))"
-        case .notAvailable: return "notAvailable"
-        case nil: return "nil"
-        }
     }
 }

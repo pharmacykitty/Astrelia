@@ -38,6 +38,7 @@ struct ContentView: View {
     @State private var azimuthOffset = 0.0
     @State private var manuallyCalibrated = false
     @State private var autoSeeded = false
+    @State private var lastSkyRefresh = Date.distantPast   // throttles the full star rebuild
     @State private var calibrating = false
     @State private var calibrationOptions: [CalibrationOption] = []
     @State private var calibrationTarget = "Sun"
@@ -47,9 +48,7 @@ struct ContentView: View {
             let size = geometry.size
             ZStack {
                 if mode == .ar {
-                    ARCameraView(controller: arController)
-                        .frame(width: size.width, height: size.height)
-                        .ignoresSafeArea()
+                    Color.black
                 } else {
                     background
                 }
@@ -61,6 +60,17 @@ struct ContentView: View {
                     let camera = makeSkyCamera(size: size)
                     let effectiveFOV = mode == .virtual ? fieldOfView : 55.0
                     ZStack {
+                        // Live camera passthrough drawn in the SAME layer as the sky.
+                        // A separate underlying AR view (RealityKit/SceneKit, or a plain
+                        // Image) rendered black here — composing it inside the working
+                        // sky TimelineView is what actually shows the feed.
+                        if mode == .ar, let cameraImage = arController.currentCameraImage() {
+                            Image(decorative: cameraImage, scale: 1)
+                                .resizable()
+                                .scaledToFill()
+                                .frame(width: size.width, height: size.height)
+                                .clipped()
+                        }
                         if let camera {
                             skyCanvas(camera: camera, effectiveFOV: effectiveFOV, size: size)
                             if filters.showSunMoon,
@@ -72,6 +82,7 @@ struct ContentView: View {
                 }
 
                 reticle
+                    .accessibilityHidden(true)
 
                 // Sky taps/zoom, below the chrome.
                 Color.clear
@@ -81,7 +92,7 @@ struct ContentView: View {
 
                 skyStatusOverlay
 
-                chrome(size: size)
+                chrome(size: size, safe: .deviceSafeArea)
             }
         }
         .ignoresSafeArea()
@@ -108,9 +119,15 @@ struct ContentView: View {
         .onChange(of: filters) { _, _ in refreshSky() }
         .task {
             while !Task.isCancelled {
-                updateInterfaceRotation()
+                updateInterfaceRotation()      // responsive: chrome must track tilt promptly
                 updateAutoCalibration()
-                refreshSky()
+                // The star field's horizontal coordinates drift on the sidereal
+                // timescale, so rebuilding the whole catalog 5×/s is wasteful — the
+                // per-frame motion is handled by the Canvas projection. Refresh calmly.
+                if Date().timeIntervalSince(lastSkyRefresh) > 1.5 {
+                    refreshSky()
+                    lastSkyRefresh = Date()
+                }
                 try? await Task.sleep(for: .milliseconds(200))
             }
         }
@@ -284,43 +301,20 @@ struct ContentView: View {
         }
     }
 
-    /// Top safe-area inset (Dynamic Island / notch). The sky is full-bleed, so the
-    /// chrome reads this directly to keep its controls clear of the island.
-    private var safeAreaTop: CGFloat {
-        UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .flatMap(\.windows)
-            .first(where: \.isKeyWindow)?
-            .safeAreaInsets.top ?? 0
-    }
-
-    private func chrome(size: CGSize) -> some View {
-        VStack(spacing: 12) {
-            HStack(spacing: 12) {
-                CircleIconButton(label: "Menu", systemImage: "square.grid.2x2") { showMenu = true }
-                    .rotationEffect(.degrees(uiRotation))
-
-                Spacer()
-
-                Picker("Mode", selection: $mode) {
-                    Text("Sky").tag(SkyMode.virtual)
-                    Text("AR").tag(SkyMode.ar)
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 132)
-                .rotationEffect(.degrees(uiRotation))
-                .sensoryFeedback(.selection, trigger: mode)
-
-                Spacer()
-
-                CircleIconButton(label: "Sky filters", systemImage: "slider.horizontal.3") { showFilters = true }
-                    .rotationEffect(.degrees(uiRotation))
-            }
-
+    /// The chrome rides the device, not the screen: as the phone tilts, the whole
+    /// control cluster orbits — as one rigid, upright unit — to whichever screen
+    /// edge is physically *up*, and the readout to the edge that's *down*. When the
+    /// phone is upright they return to the portrait top/bottom. `uiRotation` already
+    /// snaps to the nearest 90°, so the cluster slides smoothly around the corner.
+    private func chrome(size: CGSize, safe: EdgeInsets) -> some View {
+        let landscape = quadrant == 1 || quadrant == 3
+        return VStack(spacing: 12) {
+            controlBar
             if let selection { selectionCard(selection) }
             if mode == .ar { calibrationBar() }
 
-            Spacer()
+            Spacer(minLength: 0)
+
             // Live readout, refreshed calmly (kept out of the 60fps render loop).
             TimelineView(.periodic(from: .now, by: 0.25)) { _ in
                 let camera = makeSkyCamera(size: size)
@@ -328,8 +322,47 @@ struct ContentView: View {
             }
         }
         .padding(.horizontal)
-        .padding(.top, max(safeAreaTop, 12))
-        .padding(.bottom)
+        .padding(.top, edgeInset(quadrant, safe) + 8)
+        .padding(.bottom, edgeInset((quadrant + 2) % 4, safe) + 6)
+        // Lay the chrome out in a frame matching the *rotated* screen, then spin the
+        // whole thing: the controls stay pinned to the physical top edge and the
+        // readout to the physical bottom, hugging whichever way the phone is tilted.
+        .frame(width: landscape ? size.height : size.width,
+               height: landscape ? size.width : size.height)
+        .rotationEffect(.degrees(uiRotation))
+        .frame(width: size.width, height: size.height)
+    }
+
+    private var controlBar: some View {
+        HStack(spacing: 12) {
+            CircleIconButton(label: "Menu", systemImage: "square.grid.2x2") { showMenu = true }
+            Spacer()
+            Picker("Mode", selection: $mode) {
+                Text("Sky").tag(SkyMode.virtual)
+                Text("AR").tag(SkyMode.ar)
+            }
+            .pickerStyle(.segmented)
+            .frame(width: 132)
+            .sensoryFeedback(.selection, trigger: mode)
+            Spacer()
+            CircleIconButton(label: "Sky filters", systemImage: "slider.horizontal.3") { showFilters = true }
+        }
+    }
+
+    /// Which screen edge is physically up: 0 top (portrait), 1 left, 2 bottom
+    /// (upside down), 3 right. Derived from the snapped chrome rotation.
+    private var quadrant: Int { (((Int((-uiRotation / 90).rounded())) % 4) + 4) % 4 }
+
+    /// Safe-area inset of the portrait edge that currently sits at position `q`
+    /// (0 top … 3 right). In landscape the physical top/bottom are screen *sides*,
+    /// which have ~no inset, so the chrome hugs them instead of leaving island gaps.
+    private func edgeInset(_ q: Int, _ safe: EdgeInsets) -> CGFloat {
+        switch q {
+        case 0: return max(safe.top, 12)
+        case 1: return max(safe.leading, 12)
+        case 2: return max(safe.bottom, 12)
+        default: return max(safe.trailing, 12)
+        }
     }
 
     private func selectionCard(_ selection: StarSelection) -> some View {
@@ -421,7 +454,7 @@ struct ContentView: View {
             Text(body.name).font(.subheadline.weight(.medium)).foregroundStyle(.white)
             Spacer()
             Text(String(format: "az %.0f° alt %+.0f°", body.azimuth.degrees, body.altitude.degrees))
-                .font(.caption2.monospacedDigit()).foregroundStyle(.white.opacity(0.5))
+                .font(.caption.monospacedDigit()).foregroundStyle(.white.opacity(0.5))
             Text(inView ? "● here" : turnHint(body))
                 .font(.caption.monospacedDigit().weight(.semibold))
                 .foregroundStyle(inView ? .green : .white.opacity(0.85))

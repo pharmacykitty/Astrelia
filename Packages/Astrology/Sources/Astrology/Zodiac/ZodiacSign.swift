@@ -7,9 +7,12 @@ public enum ZodiacSign: Int, Sendable, Hashable, CaseIterable {
     case aries, taurus, gemini, cancer, leo, virgo
     case libra, scorpio, sagittarius, capricorn, aquarius, pisces
 
-    /// The sign occupied by a given ecliptic longitude.
+    /// The sign occupied by a given ecliptic longitude. A tiny epsilon absorbs
+    /// the round-trip error of `Angle` (stored in radians) so a longitude sitting
+    /// exactly on a 30° cusp classifies into the sign it begins, not the one before.
     public init(longitude: Angle) {
-        let index = Int((longitude.normalized.degrees / 30.0).rounded(.down)) % 12
+        let deg = longitude.normalized.degrees + 1e-9
+        let index = Int((deg / 30.0).rounded(.down)) % 12
         self = ZodiacSign(rawValue: index)!
     }
 
@@ -59,9 +62,11 @@ public struct ZodiacPosition: Sendable, Hashable {
 
     public init(longitude: Angle) {
         let lon = longitude.normalized
+        let sign = ZodiacSign(longitude: lon)
         self.longitude = lon
-        self.sign = ZodiacSign(longitude: lon)
-        self.degreesIntoSign = lon.degrees.truncatingRemainder(dividingBy: 30.0)
+        self.sign = sign
+        // Tie the offset to the chosen sign so a cusp longitude reads 0°, not 30°.
+        self.degreesIntoSign = max(0, min(30, lon.degrees - sign.startLongitude.degrees))
     }
 
     /// Degree-minute-second breakdown within the sign.

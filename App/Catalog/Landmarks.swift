@@ -74,6 +74,49 @@ enum LandmarkType: String, CaseIterable {
         case .galaxy: Color(white: 0.92)
         }
     }
+
+    /// The broad bucket this type rolls up into, used to group landmarks into a
+    /// handful of catalog dropdowns rather than seven thin ones.
+    var group: LandmarkGroup {
+        switch self {
+        case .emissionNebula, .planetaryNebula, .supernovaRemnant: .nebulae
+        case .openCluster, .globularCluster: .clusters
+        case .blackHole: .blackHoles
+        case .galaxy: .galaxies
+        }
+    }
+}
+
+/// A broad landmark category — the top level of the catalog's dropdown grouping.
+enum LandmarkGroup: String, CaseIterable {
+    case nebulae, clusters, blackHoles, galaxies
+
+    var title: String {
+        switch self {
+        case .nebulae: "Nebulae"
+        case .clusters: "Star Clusters"
+        case .blackHoles: "Black Holes"
+        case .galaxies: "Galaxies"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .nebulae: "smoke.fill"
+        case .clusters: "sparkles"
+        case .blackHoles: "circle.circle"
+        case .galaxies: "hurricane"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .nebulae: Color(red: 1.0, green: 0.45, blue: 0.6)
+        case .clusters: Color(red: 0.72, green: 0.86, blue: 1.0)
+        case .blackHoles: Color(red: 1.0, green: 0.82, blue: 0.6)
+        case .galaxies: Color(white: 0.92)
+        }
+    }
 }
 
 enum Landmarks {

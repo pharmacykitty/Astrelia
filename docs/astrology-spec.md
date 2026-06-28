@@ -183,15 +183,27 @@ Mirror the `CelestialCore` discipline — every transform tested against a known
 
 ## 9. Phased build
 
-1. **Phase A — angles & easy houses.** ASC/MC; Whole Sign, Equal, Porphyry. Tropical only.
-   Test against astro.com. (No new ephemeris needed — Sun/Moon already exist.)
-2. **Phase B — planets.** Wire SwiftAA (MIT) for Mercury–Neptune; Pluto polynomial; nodes;
-   retrograde flag. Now a full body set exists.
-3. **Phase C — Placidus + aspects.** Iterative Placidus with high-latitude fallback;
-   aspect engine with configurable orbs.
-4. **Phase D — charts.** NatalChart + Transit structs; Part of Fortune; SwiftData persistence
-   in the app layer; sidereal/Lahiri toggle.
-5. **Phase E — UI.** Chart wheel, detail sheets (separate astrology UI surface).
+1. **Phase A ✅ — angles & easy houses.** ASC/MC; Whole Sign, Equal, Porphyry. Tropical +
+   sidereal. (No new ephemeris — Sun/Moon already exist.) Done.
+2. **Phase B ✅ — planets.** `CelestialCore.Planets` (SwiftAA, MIT) for Mercury–Neptune
+   (`ApparentGeocentricLongitude`); Pluto via Meeus 37 heliocentric + VSOP87 Earth, reduced
+   to geocentric and precessed J2000→date; mean nodes ✅; retrograde ✅ (speed sign).
+   Validated: Meeus 33.a (Venus RA/Dec), Mercury/Venus elongation bounds, published Pluto
+   ephemeris (1°23′ Aquarius ℞, 2024-07-01). SwiftAA lives in `CelestialCore` (serves the
+   Sky view too), not `Astrology`.
+3. **Phase C ✅ — Placidus + aspects.** Iterative Placidus with high-latitude fallback;
+   aspect engine with configurable orbs (major+minor, luminary bonus, applying/separating).
+   Done. (Placidus validated against its own semi-arc definition; revisit with an astro.com
+   numeric fixture when convenient.)
+4. **Phase D (partial) — charts.** `NatalChart` + Part of Fortune + day/night sect ✅.
+   Still: a `Transit` convenience, SwiftData persistence (raw inputs), birth-data entry.
+5. **Phase E (first cut ✅) — UI.** `AstrologyView` "Sky Now" + `ChartWheel`. Still: birth
+   chart entry, detail sheets, interpretation text.
+
+**Status (2026-06-27):** Phases A, B, C complete; D & E first cut. `swift test` green —
+Astrology 22 tests, CelestialCore 32 (incl. planet/Pluto). Charts carry the full body set
+(Sun, Moon, Mercury–Pluto, nodes) with retrograde. Remaining: birth-data entry + SwiftData
+persistence, transits, interpretation text, sidereal UI toggle, and the ★ AR overlay.
 
 ---
 

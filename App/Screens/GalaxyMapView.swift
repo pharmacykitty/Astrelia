@@ -20,10 +20,14 @@ struct GalaxyMapView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var focusApplied = false
-    @State private var hostStarIDs: Set<Int> = []   // catalog stars that host known planets
     @State private var shownSystem: PlanetarySystem?
+    @State private var showMilkyWay = true          // toggle the stylized backdrop off to see only real objects
+    @State private var hostsOnly = false            // show only stars with known planets (+ Sun & landmarks)
+    @State private var showOptions = false          // the drop-down view-options panel
+    @State private var showCatalog = false
     @State private var stars: [GalaxyStar] = []
     @State private var backdrop: [BackdropPoint] = []   // stylized Milky Way (art, not catalogued)
+    @State private var backdropDust: [BackdropPoint] = []   // dark dust lanes, carved over the glow
     @State private var flightTask: Task<Void, Never>?
 
     // Orbit camera (parsecs).
@@ -48,13 +52,15 @@ struct GalaxyMapView: View {
 
     @State private var selection: MapSelection?
 
-    /// What the user has tapped — a real star or a curated landmark.
+    /// What the user has tapped — the Sun, a real star, or a curated landmark.
     private enum MapSelection {
+        case sun
         case star(GalaxyStar)
         case landmark(Landmark)
 
         var position: SIMD3<Float> {
             switch self {
+            case .sun: .zero
             case .star(let s): s.position
             case .landmark(let l): l.positionParsecs
             }
@@ -67,102 +73,104 @@ struct GalaxyMapView: View {
         GeometryReader { geometry in
             let size = geometry.size
             let viewProjection = makeViewProjection(aspect: Float(size.width / max(size.height, 1)))
+            // Read here (not just inside the Canvas closure) so the view re-renders
+            // when the exoplanet catalog finishes loading.
+            let hostHIPs = exo.hostHIPs
 
             ZStack {
                 LinearGradient(colors: [Color(red: 0.01, green: 0.01, blue: 0.05), .black],
                                startPoint: .top, endPoint: .bottom)
 
+                // Gestures live on the canvas layer (below the overlay) so taps on
+                // overlay buttons interact with the button, not the stars behind it.
                 Canvas { context, _ in
-                    draw(in: context, size: size, viewProjection: viewProjection)
+                    draw(in: context, size: size, viewProjection: viewProjection, hostHIPs: hostHIPs)
                 }
+                .contentShape(Rectangle())
+                .gesture(dragGesture)
+                .simultaneousGesture(zoomGesture)
+                .simultaneousGesture(tapGesture(size: size, viewProjection: viewProjection, hostHIPs: hostHIPs))
 
-                overlay(size: size, viewProjection: viewProjection)
+                overlay(size: size, viewProjection: viewProjection, safe: .deviceSafeArea)
             }
-            .contentShape(Rectangle())
-            .gesture(dragGesture)
-            .simultaneousGesture(zoomGesture)
-            .simultaneousGesture(tapGesture(size: size, viewProjection: viewProjection))
         }
         .ignoresSafeArea()
         .toolbar(.hidden, for: .navigationBar)
         .task(id: store.catalog?.count ?? 0) {
-            buildStars(); buildBackdrop(); applyInitialFocusIfNeeded(); computeHostStars()
+            buildStars(); buildBackdrop(); applyInitialFocusIfNeeded()
         }
-        .task(id: exo.systems.count) { computeHostStars() }
         .onDisappear { flightTask?.cancel(); flyTask?.cancel() }
         .fullScreenCover(item: $shownSystem) { SystemView(system: $0) }
-    }
-
-    /// Which catalog stars host known planets — so the map can badge them.
-    private func computeHostStars() {
-        guard hostStarIDs.isEmpty, let catalog = store.catalog, !exo.hostHIPs.isEmpty else { return }
-        var ids = Set<Int>()
-        for star in catalog.stars {
-            if let hip = star.hipparcos, exo.hostHIPs.contains(hip) { ids.insert(star.id) }
+        .fullScreenCover(isPresented: $showCatalog) {
+            NavigationStack {
+                CatalogView(store: store, exo: exo)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            CircleIconButton(label: "Close", systemImage: "xmark") { showCatalog = false }
+                        }
+                    }
+            }
+            .preferredColorScheme(.dark)
         }
-        hostStarIDs = ids
-    }
-
-    /// Device safe-area insets, read directly since the map ignores the safe area
-    /// (so the galaxy fills the screen) but the controls should still stay clear.
-    private var safeInsets: UIEdgeInsets {
-        UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .flatMap(\.windows)
-            .first(where: \.isKeyWindow)?
-            .safeAreaInsets ?? .zero
     }
 
     // MARK: Rendering
 
-    private func draw(in context: GraphicsContext, size: CGSize, viewProjection: simd_float4x4) {
+    private func draw(in context: GraphicsContext, size: CGSize, viewProjection: simd_float4x4, hostHIPs: Set<Int>) {
         let focal = Double(1 / tan(fieldOfView / 2))
         let halfH = Double(size.height) * 0.5
         let maxDim = Double(max(size.width, size.height))
 
-        // Broad galactic glow: a soft continuous haze around the disc/core so the
-        // Milky Way reads as luminous structure, not just discrete points. Cheap
-        // (a couple of radial gradients), drawn under the point field.
-        if let (cp, cdepth) = project(Galactic.centerPosition, viewProjection, size), cdepth > 0 {
+        // Broad warm glow for the galactic core/bulge — a soft luminous centre.
+        // The disc/arm haze is no longer a flat circle: it comes from the bloom
+        // pass over the real point field below, so it follows the true spiral/bar
+        // shape and viewing angle instead of reading as a smudge.
+        if showMilkyWay, let (cp, cdepth) = project(Galactic.centerPosition, viewProjection, size), cdepth > 0 {
             let pxPerPc = halfH * focal / Double(cdepth)
-            let discR = CGFloat(min(maxDim * 1.8, 15000 * pxPerPc))
-            let coreR = CGFloat(min(maxDim, 3200 * pxPerPc))
-            func rect(_ rad: CGFloat) -> CGRect { CGRect(x: cp.x - rad, y: cp.y - rad, width: rad * 2, height: rad * 2) }
-            context.drawLayer { layer in
-                layer.blendMode = .plusLighter
-                if discR > 6 {
-                    layer.fill(Path(ellipseIn: rect(discR)),
-                               with: .radialGradient(Gradient(colors: [Color(red: 0.45, green: 0.55, blue: 0.85).opacity(0.12), .clear]),
-                                                     center: cp, startRadius: 0, endRadius: discR))
-                }
-                if coreR > 4 {
-                    layer.fill(Path(ellipseIn: rect(coreR)),
-                               with: .radialGradient(Gradient(colors: [Color(red: 1.0, green: 0.9, blue: 0.7).opacity(0.35), .clear]),
+            let coreR = CGFloat(min(maxDim * 0.9, 3000 * pxPerPc))
+            if coreR > 4 {
+                context.drawLayer { layer in
+                    layer.blendMode = .plusLighter
+                    layer.fill(Path(ellipseIn: CGRect(x: cp.x - coreR, y: cp.y - coreR, width: coreR * 2, height: coreR * 2)),
+                               with: .radialGradient(Gradient(colors: [Color(red: 1.0, green: 0.92, blue: 0.74).opacity(0.42),
+                                                                        Color(red: 1.0, green: 0.85, blue: 0.6).opacity(0.12), .clear]),
                                                      center: cp, startRadius: 0, endRadius: coreR))
                 }
             }
         }
 
-        // Stylized Milky Way: batched into a blurred, additive layer. Points are
-        // grouped by colour and a coarse opacity level, so we issue ~16 fills
-        // instead of thousands. Off-screen and sub-pixel points are culled.
-        context.drawLayer { layer in
-            layer.addFilter(.blur(radius: 3.0))
-            layer.blendMode = .plusLighter
+        // Stylized Milky Way point field, drawn in two additive passes for a
+        // photographic look: a heavy-blur *bloom* that fuses the points into smooth
+        // luminous structure following the real arms/bar, then a crisp pass for
+        // defined cores. Points are batched by colour + opacity level (a few dozen
+        // fills, built once and reused by both passes); off-screen/sub-pixel culled.
+        if showMilkyWay {
             var paths = Array(repeating: Array(repeating: Path(), count: backdropOpacityLevels.count),
                               count: backdropPalette.count)
             for point in backdrop {
                 guard let (p, depth) = project(point.position, viewProjection, size) else { continue }
-                if p.x < -4 || p.x > size.width + 4 || p.y < -4 || p.y > size.height + 4 { continue }
-                let r = point.size * CGFloat(min(3.2, max(0.8, Double(900 / depth))))
-                if r < 0.45 { continue }
-                let o = point.baseOpacity
-                let lvl = o < 0.2 ? 0 : (o < 0.39 ? 1 : (o < 0.62 ? 2 : 3))
+                if p.x < -6 || p.x > size.width + 6 || p.y < -6 || p.y > size.height + 6 { continue }
+                let r = point.size * CGFloat(min(3.4, max(0.6, Double(800 / depth))))
+                if r < 0.4 { continue }
+                let lvl = min(backdropOpacityLevels.count - 1, Int(point.baseOpacity * Double(backdropOpacityLevels.count)))
                 paths[point.colorBucket][lvl].addEllipse(in: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2))
             }
-            for c in backdropPalette.indices {
-                for l in backdropOpacityLevels.indices {
-                    layer.fill(paths[c][l], with: .color(backdropPalette[c].opacity(backdropOpacityLevels[l])))
+            context.drawLayer { layer in            // bloom — soft structure-following haze
+                layer.addFilter(.blur(radius: 8))
+                layer.blendMode = .plusLighter
+                for c in backdropPalette.indices {
+                    for l in backdropOpacityLevels.indices {
+                        layer.fill(paths[c][l], with: .color(backdropPalette[c].opacity(backdropOpacityLevels[l] * 0.55)))
+                    }
+                }
+            }
+            context.drawLayer { layer in            // crisp cores
+                layer.addFilter(.blur(radius: 1.1))
+                layer.blendMode = .plusLighter
+                for c in backdropPalette.indices {
+                    for l in backdropOpacityLevels.indices {
+                        layer.fill(paths[c][l], with: .color(backdropPalette[c].opacity(backdropOpacityLevels[l])))
+                    }
                 }
             }
         }
@@ -172,20 +180,23 @@ struct GalaxyMapView: View {
         var starPaths = Array(repeating: Path(), count: starPalette.count)
         var glowPath = Path()
         var hostBadges = Path()         // rings around stars with known planets
-        let badging = !hostStarIDs.isEmpty
         var drawn = 0
         for star in stars {
+            let isHost = star.hip.map { hostHIPs.contains($0) } ?? false
+            if hostsOnly && !isHost { continue }
             guard let (p, depth) = project(star.position, viewProjection, size) else { continue }
             if p.x < -3 || p.x > size.width + 3 || p.y < -3 || p.y > size.height + 3 { continue }
             let r = star.baseSize * CGFloat(min(3.0, max(0.4, 150 / depth)))
-            if r < 0.5 { continue }
+            if r < 0.5 && !hostsOnly { continue }
             if star.magnitude < 1.5 {
                 let g = r * 3
                 glowPath.addEllipse(in: CGRect(x: p.x - g, y: p.y - g, width: g * 2, height: g * 2))
             }
-            starPaths[star.colorBucket].addEllipse(in: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2))
-            if badging, hostStarIDs.contains(star.id) {
-                let br = max(r + 3, 5)
+            // In hosts-only mode give every host a floor size so distant ones stay visible.
+            let rr = hostsOnly ? max(r, 1.6) : r
+            starPaths[star.colorBucket].addEllipse(in: CGRect(x: p.x - rr, y: p.y - rr, width: rr * 2, height: rr * 2))
+            if isHost {
+                let br = max(rr + 3, 5)
                 hostBadges.addEllipse(in: CGRect(x: p.x - br, y: p.y - br, width: br * 2, height: br * 2))
             }
             drawn += 1
@@ -218,7 +229,7 @@ struct GalaxyMapView: View {
             if p.x < -r - 30 || p.x > size.width + r + 30 || p.y < -r - 30 || p.y > size.height + r + 30 { continue }
 
             if r >= 4 {
-                drawLandmark(context, landmark, at: p, radius: r)
+                drawLandmark(context, landmark, at: p, radius: r, viewProjection: viewProjection, size: size)
             } else {
                 let color = landmark.type.color
                 context.fill(Path(ellipseIn: CGRect(x: p.x - 8, y: p.y - 8, width: 16, height: 16)), with: .color(color.opacity(0.13)))
@@ -247,7 +258,8 @@ struct GalaxyMapView: View {
 
     /// Draws a landmark at true scale: a glowing nebula cloud, star cluster, galaxy
     /// haze, or black-hole glow, sized to its projected physical radius.
-    private func drawLandmark(_ context: GraphicsContext, _ landmark: Landmark, at p: CGPoint, radius r: CGFloat) {
+    private func drawLandmark(_ context: GraphicsContext, _ landmark: Landmark, at p: CGPoint, radius r: CGFloat,
+                              viewProjection: simd_float4x4, size: CGSize) {
         let color = landmark.type.color
         func rect(_ c: CGPoint, _ rad: CGFloat) -> CGRect { CGRect(x: c.x - rad, y: c.y - rad, width: rad * 2, height: rad * 2) }
         // Stable per-object seed (String.hashValue is randomised per launch, so don't use it).
@@ -260,46 +272,36 @@ struct GalaxyMapView: View {
 
         switch landmark.type {
         case .emissionNebula, .supernovaRemnant, .planetaryNebula:
-            context.drawLayer { layer in
-                layer.blendMode = .plusLighter
-                layer.fill(Path(ellipseIn: rect(p, r)),
-                           with: .radialGradient(Gradient(colors: [color.opacity(0.40), color.opacity(0.0)]),
-                                                 center: p, startRadius: 0, endRadius: r))
-                if landmark.type == .planetaryNebula {
-                    layer.stroke(Path(ellipseIn: rect(p, r * 0.55)), with: .color(color.opacity(0.6)),
-                                 lineWidth: max(1.5, r * 0.18))
-                    layer.fill(Path(ellipseIn: rect(p, max(1.5, r * 0.08))), with: .color(.white))
-                } else {
-                    let knots = Int(min(14, max(4, r / 12)))
-                    for _ in 0..<knots {
-                        let ang = rnd(0, 2 * .pi), rad = rnd(0, Double(r) * 0.65)
-                        let kp = CGPoint(x: p.x + CGFloat(cos(ang) * rad), y: p.y + CGFloat(sin(ang) * rad))
-                        let kr = r * CGFloat(rnd(0.06, 0.20))
-                        let kc = landmark.type == .supernovaRemnant ? color : Color(red: 1.0, green: 0.62, blue: 0.72)
-                        layer.fill(Path(ellipseIn: rect(kp, kr)),
-                                   with: .radialGradient(Gradient(colors: [kc.opacity(0.55), .clear]),
-                                                         center: kp, startRadius: 0, endRadius: kr))
-                    }
-                    layer.fill(Path(ellipseIn: rect(p, max(1.2, r * 0.04))), with: .color(.white.opacity(0.7)))
-                }
-            }
+            drawNebula(context, landmark, at: p, radius: r, viewProjection: viewProjection, size: size)
 
         case .openCluster, .globularCluster:
             let globular = landmark.type == .globularCluster
+            // Member stars live in 3D, scattered in a sphere around the cluster's real
+            // position, then projected individually — so the cluster rotates and
+            // parallaxes with the camera instead of being a flat decal on the screen.
+            let center = landmark.positionParsecs
+            let physR = Float(landmark.radiusParsecs)
+            let n = globular ? 220 : 60
             context.drawLayer { layer in
                 layer.blendMode = .plusLighter
                 if globular {
                     layer.fill(Path(ellipseIn: rect(p, r * 0.6)),
-                               with: .radialGradient(Gradient(colors: [color.opacity(0.35), .clear]),
+                               with: .radialGradient(Gradient(colors: [color.opacity(0.28), .clear]),
                                                      center: p, startRadius: 0, endRadius: r * 0.6))
                 }
-                let n = globular ? 160 : 50
                 for _ in 0..<n {
-                    let rad: Double = globular ? abs(gauss()) * Double(r) * 0.42 : rnd(0, Double(r))
-                    let ang = rnd(0, 2 * .pi)
-                    let sp = CGPoint(x: p.x + CGFloat(cos(ang) * rad), y: p.y + CGFloat(sin(ang) * rad))
-                    let dr = CGFloat(rnd(0.6, 1.7))
-                    layer.fill(Path(ellipseIn: rect(sp, dr)), with: .color(.white.opacity(0.9)))
+                    // Random direction on the unit sphere.
+                    let z = rnd(-1, 1)
+                    let t = rnd(0, 2 * .pi)
+                    let rxy = (1 - z * z).squareRoot()
+                    let dir = SIMD3<Float>(Float(cos(t) * rxy), Float(sin(t) * rxy), Float(z))
+                    // Globulars concentrate toward the core; open clusters fill the sphere.
+                    let frac = globular ? min(1, abs(gauss()) * 0.42) : pow(rnd(0, 1), 1.0 / 3.0)
+                    let world = center + dir * (physR * Float(frac))
+                    guard let (sp, depth) = project(world, viewProjection, size), depth > 0 else { continue }
+                    if sp.x < -4 || sp.x > size.width + 4 || sp.y < -4 || sp.y > size.height + 4 { continue }
+                    let dr = CGFloat(max(0.6, min(3.0, Double(r) * rnd(0.025, 0.055))))
+                    layer.fill(Path(ellipseIn: rect(sp, dr)), with: .color(.white.opacity(rnd(0.6, 0.95))))
                 }
             }
 
@@ -329,28 +331,163 @@ struct GalaxyMapView: View {
         }
     }
 
-    private func overlay(size: CGSize, viewProjection: simd_float4x4) -> some View {
-        ZStack {
+    /// Renders a nebula as a genuine volumetric cloud rather than a flat decal: gas
+    /// "puffs" are distributed in real 3D space around the object's position and
+    /// projected individually, so the cloud has depth, internal structure, and
+    /// parallaxes / rotates with the camera — you can even fly into it. Same trick the
+    /// clusters use for their member stars, applied to soft additive gas sprites.
+    private func drawNebula(_ context: GraphicsContext, _ landmark: Landmark, at p: CGPoint,
+                            radius r: CGFloat, viewProjection: simd_float4x4, size: CGSize) {
+        let focal = Double(1 / tan(fieldOfView / 2))
+        let halfH = Double(size.height) * 0.5
+        let cap = CGFloat(max(size.width, size.height) * 1.5)
+
+        // Stable per-object seed (String.hashValue is randomised per launch).
+        var rng = SeededGenerator(seed: landmark.id.unicodeScalars.reduce(UInt64(1469598103)) { $0 &* 31 &+ UInt64($1.value) })
+        func rnd(_ a: Double, _ b: Double) -> Double { Double.random(in: a...b, using: &rng) }
+        func gauss() -> Double {
+            let u1 = Double.random(in: 1e-6...1, using: &rng), u2 = Double.random(in: 0...1, using: &rng)
+            return (-2 * log(u1)).squareRoot() * cos(2 * .pi * u2)
+        }
+        func gauss3() -> SIMD3<Float> { SIMD3(Float(gauss()), Float(gauss()), Float(gauss())) }
+        func unitDir() -> SIMD3<Float> {
+            let z = rnd(-1, 1), t = rnd(0, 2 * .pi), rxy = (1 - z * z).squareRoot()
+            return SIMD3(Float(cos(t) * rxy), Float(sin(t) * rxy), Float(z))
+        }
+
+        let center = landmark.positionParsecs
+        let physR = Float(landmark.radiusParsecs)
+        let color = landmark.type.color
+        let teal = Color(red: 0.35, green: 0.7, blue: 0.95)   // OIII-ish cool tint
+        let pink = Color(red: 1.0, green: 0.55, blue: 0.72)   // H-alpha warm knots
+
+        // A randomly oriented anisotropy frame so clouds aren't axis-aligned blobs.
+        let a = simd_normalize(gauss3() + SIMD3(0.0001, 0, 0))
+        let b = simd_normalize(gauss3() - a * simd_dot(a, gauss3()))
+        let (ex, ey, ez) = (a, b, simd_cross(a, b))
+        let aniso = SIMD3<Float>(1.0, Float(rnd(0.55, 0.95)), Float(rnd(0.6, 0.95)))
+        func shape(_ v: SIMD3<Float>) -> SIMD3<Float> {
+            ex * (v.x * aniso.x) + ey * (v.y * aniso.y) + ez * (v.z * aniso.z)
+        }
+
+        // (worldPosition, physicalRadius in pc, colour, baseOpacity)
+        var puffs: [(pos: SIMD3<Float>, rad: Float, color: Color, op: Double)] = []
+        var embeddedStars: [SIMD3<Float>] = []
+
+        switch landmark.type {
+        case .planetaryNebula:
+            // A thin glowing shell (the ejected envelope) with brighter bipolar lobes
+            // along a random axis, around a hot white central star.
+            let axis = simd_normalize(shape(unitDir()))
+            let shellR = physR * 0.62
+            for _ in 0..<70 {
+                let d = shape(unitDir())
+                let pos = center + d * shellR * Float(rnd(0.9, 1.08))
+                let align = abs(simd_dot(simd_normalize(d), axis))
+                puffs.append((pos, physR * Float(rnd(0.1, 0.2)), align > 0.6 ? color : teal, 0.22 + Double(align) * 0.3))
+            }
+            for s in [-1.0, 1.0] {
+                let lobe = center + axis * (shellR * Float(s) * 0.8)
+                for _ in 0..<14 {
+                    puffs.append((lobe + shape(gauss3()) * shellR * 0.35, physR * Float(rnd(0.12, 0.24)), teal, 0.2))
+                }
+            }
+            embeddedStars.append(center)
+
+        case .supernovaRemnant:
+            // A ragged filamentary shell: puffs over a sphere surface with radial
+            // jitter, two-tone (H-alpha + the characteristic violet/teal), faint inside.
+            let shellR = physR * 0.85
+            let n = Int(min(170, max(80, Double(r))))
+            for _ in 0..<n {
+                let pos = center + shape(unitDir()) * shellR * Float(rnd(0.82, 1.06))
+                puffs.append((pos, physR * Float(rnd(0.05, 0.12)), rnd(0, 1) < 0.5 ? color : pink, rnd(0.3, 0.52)))
+            }
+            for _ in 0..<24 {
+                puffs.append((center + shape(gauss3()) * physR * 0.45, physR * Float(rnd(0.25, 0.5)), color, 0.06))
+            }
+
+        default:   // emissionNebula — a billowy, clumpy star-forming cloud
+            let lobeCount = 7
+            var lobes: [(SIMD3<Float>, Float)] = []
+            for _ in 0..<lobeCount { lobes.append((shape(gauss3()) * (physR * 0.45), Float(rnd(0.4, 0.85)))) }
+            let n = Int(min(150, max(60, Double(r) / 1.5)))
+            for _ in 0..<n {
+                let (lc, ls) = lobes[Int(rnd(0, Double(lobeCount) - 1e-3))]
+                let pos = center + lc + shape(gauss3()) * (physR * ls * 0.5)
+                let outer = Double(simd_length(lc) / max(physR, 0.001))
+                let col = rnd(0, 1) < (0.22 + outer * 0.45) ? teal : (rnd(0, 1) < 0.85 ? color : pink)
+                puffs.append((pos, physR * Float(rnd(0.18, 0.42)) * ls, col, rnd(0.07, 0.17)))
+            }
+            for _ in 0..<Int(min(18, max(6, Double(r) / 8))) {   // bright HII knots
+                puffs.append((center + shape(gauss3()) * (physR * 0.4), physR * Float(rnd(0.05, 0.12)), pink, rnd(0.42, 0.62)))
+            }
+            for _ in 0..<8 { embeddedStars.append(center + shape(gauss3()) * (physR * 0.5)) }
+        }
+
+        // Project + cull, then depth-sort far → near so nearer gas layers over far gas.
+        struct Sprite { let p: CGPoint; let r: CGFloat; let color: Color; let op: Double; let depth: Float }
+        var sprites: [Sprite] = []
+        sprites.reserveCapacity(puffs.count)
+        for puff in puffs {
+            guard let (sp, depth) = project(puff.pos, viewProjection, size), depth > 0 else { continue }
+            let rad = min(CGFloat(Double(puff.rad) * halfH * focal / Double(depth)), cap)
+            if rad < 0.6 { continue }
+            let m = rad + 4
+            if sp.x < -m || sp.x > size.width + m || sp.y < -m || sp.y > size.height + m { continue }
+            sprites.append(Sprite(p: sp, r: rad, color: puff.color, op: puff.op, depth: depth))
+        }
+        sprites.sort { $0.depth > $1.depth }
+
+        context.drawLayer { layer in
+            layer.blendMode = .plusLighter
+            for s in sprites {
+                // 3-stop: a brighter, more defined core that falls off to the rim,
+                // so the cloud's structure reads clearly instead of washing out.
+                layer.fill(Path(ellipseIn: CGRect(x: s.p.x - s.r, y: s.p.y - s.r, width: s.r * 2, height: s.r * 2)),
+                           with: .radialGradient(Gradient(colors: [s.color.opacity(s.op), s.color.opacity(s.op * 0.4), .clear]),
+                                                 center: s.p, startRadius: 0, endRadius: s.r))
+            }
+            for w in embeddedStars {
+                guard let (sp, depth) = project(w, viewProjection, size), depth > 0 else { continue }
+                let dr = CGFloat(max(1.0, min(3.5, Double(physR) * 0.05 * halfH * focal / Double(depth))))
+                layer.fill(Path(ellipseIn: CGRect(x: sp.x - dr * 3, y: sp.y - dr * 3, width: dr * 6, height: dr * 6)),
+                           with: .radialGradient(Gradient(colors: [Color.white.opacity(0.5), .clear]),
+                                                 center: sp, startRadius: 0, endRadius: dr * 3))
+                layer.fill(Path(ellipseIn: CGRect(x: sp.x - dr, y: sp.y - dr, width: dr * 2, height: dr * 2)), with: .color(.white))
+            }
+        }
+    }
+
+    private func overlay(size: CGSize, viewProjection: simd_float4x4, safe: EdgeInsets) -> some View {
+        ZStack(alignment: .top) {
             VStack(spacing: 0) {
+                // Compact control bar: navigation + flight stay inline; the view
+                // toggles live behind one "Options" button that drops a panel down.
                 HStack(spacing: 8) {
-                    CircleIconButton(label: "Back", systemImage: "chevron.left") { dismiss() }
-                    Text("\(stars.count) stars")
-                        .font(.caption.monospacedDigit()).foregroundStyle(.white.opacity(0.6))
+                    backButton
+                    catalogButton
                     Spacer()
-                    CircleIconButton(label: "Centre on the Sun", systemImage: "sun.max.fill") {
-                        exitFlyMode(); animateCamera(to: .zero, distance: 220)
+                    CircleIconButton(label: "View options", systemImage: "slider.horizontal.3",
+                                     isActive: showOptions) {
+                        withAnimation(.spring(duration: 0.3)) { showOptions.toggle() }
                     }
-                    CircleIconButton(label: "Galaxy overview", systemImage: "hurricane") {
-                        exitFlyMode(); flyToGalaxy()
-                    }
-                    CircleIconButton(label: flyMode ? "Exit free flight" : "Free flight",
-                                     systemImage: flyMode ? "airplane.circle.fill" : "airplane",
-                                     tint: .green, isActive: flyMode) {
-                        flyMode ? exitFlyMode() : enterFlyMode()
-                    }
+                    flyButton
                 }
                 .padding(.horizontal)
-                .padding(.top, safeInsets.top + 4)
+                .padding(.top, safe.top + 8)
+
+                // Star count: a light, left-aligned label — the scale of the real
+                // near-field star field, kept understated so it doesn't compete.
+                HStack {
+                    Text("\(stars.count.formatted()) stars")
+                        .font(.footnote.monospacedDigit())
+                        .foregroundStyle(.white.opacity(0.5))
+                        .shadow(radius: 3)
+                    Spacer()
+                }
+                .padding(.horizontal)
+                .padding(.top, 10)
 
                 Spacer()
 
@@ -359,11 +496,26 @@ struct GalaxyMapView: View {
                 } else {
                     Text(flyMode ? "Drag to steer · two-finger drag up/down to set speed"
                                  : "Drag to orbit · pinch to zoom · tap a star or landmark")
-                        .font(.caption).foregroundStyle(.white.opacity(0.45))
+                        .font(.caption).foregroundStyle(.white.opacity(0.4))
                         .multilineTextAlignment(.center).padding(.horizontal)
                 }
+
+                // Distance from Earth: faint, quiet text along the bottom — the
+                // through-line of how far you've travelled, not a flashy badge.
+                DistanceReadout(parsecs: cameraDistanceParsecs)
+                    .padding(.top, 10)
             }
-            .padding(.bottom, safeInsets.bottom + 10)
+            .padding(.bottom, safe.bottom + 10)
+
+            // The expandable options panel, dropping down from under its button.
+            if showOptions {
+                optionsPanel
+                    .padding(.trailing)
+                    .padding(.top, safe.top + 8 + Theme.controlSize + 6)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .zIndex(1)
+            }
 
             if flyMode {
                 // Steering anchor at screen centre.
@@ -372,7 +524,7 @@ struct GalaxyMapView: View {
                 // Persistent-speed feedback near the top; only shown while moving.
                 if throttle != 0 {
                     VStack {
-                        Spacer().frame(height: safeInsets.top + 52)
+                        Spacer().frame(height: safe.top + 96)
                         SpeedReadout(throttle: throttle, maxSpeed: flySpeed)
                         Spacer()
                     }
@@ -385,12 +537,87 @@ struct GalaxyMapView: View {
         }
     }
 
+    // MARK: Controls
+
+    private var backButton: some View {
+        CircleIconButton(label: "Back", systemImage: "chevron.left") { dismiss() }
+    }
+    private var catalogButton: some View {
+        CircleIconButton(label: "Catalog", systemImage: "magnifyingglass") { showCatalog = true }
+    }
+    private var flyButton: some View {
+        CircleIconButton(label: flyMode ? "Exit free flight" : "Free flight",
+                         systemImage: flyMode ? "airplane.circle.fill" : "airplane",
+                         tint: .green, isActive: flyMode) {
+            flyMode ? exitFlyMode() : enterFlyMode()
+        }
+    }
+
+    /// The drop-down of map view options — toggles stay open with a check; one-shot
+    /// camera actions close the panel.
+    private var optionsPanel: some View {
+        let teal = Color(red: 0.4, green: 0.95, blue: 0.9)
+        return VStack(spacing: 2) {
+            optionRow("Milky Way", "sparkles", tint: .purple, toggle: true, isOn: showMilkyWay) {
+                showMilkyWay.toggle()
+            }
+            optionRow("Planet hosts only", "globe.americas.fill", tint: teal, toggle: true, isOn: hostsOnly) {
+                hostsOnly.toggle()
+            }
+            Divider().overlay(.white.opacity(0.12)).padding(.vertical, 2)
+            optionRow("Centre on the Sun", "sun.max.fill", tint: Theme.accent, toggle: false, isOn: false) {
+                closeOptions(); exitFlyMode(); animateCamera(to: .zero, distance: 220)
+            }
+            optionRow("Galaxy overview", "hurricane", tint: Theme.accent, toggle: false, isOn: false) {
+                closeOptions(); exitFlyMode(); flyToGalaxy()
+            }
+        }
+        .padding(8)
+        .frame(width: 236)
+        .luminousSurface()
+    }
+
+    private func optionRow(_ label: String, _ icon: String, tint: Color,
+                           toggle: Bool, isOn: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: icon)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(isOn ? tint : .white.opacity(0.85))
+                    .frame(width: 26)
+                Text(label).font(.subheadline).foregroundStyle(.white)
+                Spacer()
+                if toggle {
+                    Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(isOn ? tint : .white.opacity(0.3))
+                }
+            }
+            .padding(.vertical, 9).padding(.horizontal, 8)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(toggle && isOn ? .isSelected : [])
+    }
+
+    private func closeOptions() {
+        withAnimation(.spring(duration: 0.3)) { showOptions = false }
+    }
+
     @ViewBuilder
     private func selectionCard(_ selection: MapSelection) -> some View {
         switch selection {
+        case .sun:
+            let sol = exo.byHost["Sol"] ?? SolarSystem.system
+            card(title: "Sol", tint: .orange,
+                 detail: "Our Sun · G2 V · home system", body: nil,
+                 systemAction: { shownSystem = sol }) {
+                exitFlyMode(); animateCamera(to: .zero, distance: 60)
+            }
         case .star(let star):
             let system = star.hip.flatMap { exo.byHIP[$0] }
-            card(title: star.name, tint: .white, detail: starDetail(star), body: nil,
+            let lightTravel = star.distanceParsecs > 0
+                ? StarFacts.lightTravelSentence(distanceParsecs: star.distanceParsecs) : nil
+            card(title: star.name, tint: .white, detail: starDetail(star), body: lightTravel,
                  systemAction: system.map { sys in { shownSystem = sys } }) { flyTo(star) }
         case .landmark(let lm):
             card(title: lm.name, tint: lm.type.color, detail: landmarkDetail(lm), body: lm.summary) { flyTo(lm) }
@@ -434,14 +661,16 @@ struct GalaxyMapView: View {
             if let body {
                 Text(body).font(.caption).foregroundStyle(.white.opacity(0.6)).fixedSize(horizontal: false, vertical: true)
             }
-            HStack(spacing: 8) {
+            VStack(spacing: 8) {
                 Button(action: fly) {
-                    Label("Fly here", systemImage: "paperplane.fill").font(.subheadline)
+                    Label("Fly here", systemImage: "paperplane.fill")
+                        .font(.subheadline).frame(maxWidth: .infinity)
                 }
                 .buttonStyle(LuminousButtonStyle(tint: tint == .white ? Theme.accent : tint))
                 if let systemAction {
                     Button(action: systemAction) {
-                        Label("System", systemImage: "circle.dotted.circle").font(.subheadline)
+                        Label("View planetary system", systemImage: "circle.dotted.circle")
+                            .font(.subheadline).frame(maxWidth: .infinity)
                     }
                     .buttonStyle(LuminousButtonStyle(tint: .cyan))
                 }
@@ -458,6 +687,14 @@ struct GalaxyMapView: View {
 
     private var lookDirection: SIMD3<Float> {
         SIMD3(cos(pitch) * sin(yaw), sin(pitch), cos(pitch) * cos(yaw))
+    }
+
+    /// The camera's distance from Earth, in parsecs. Earth sits at the catalog
+    /// origin (the Sun), so this is just the length of the eye position — the "how
+    /// far have I travelled from home" readout.
+    private var cameraDistanceParsecs: Float {
+        let eyePosition = flyMode ? eye : target + distance * lookDirection
+        return simd_length(eyePosition)
     }
 
     private func makeViewProjection(aspect: Float) -> simd_float4x4 {
@@ -611,7 +848,7 @@ struct GalaxyMapView: View {
             .onEnded { _ in zoomAnchor = distance }
     }
 
-    private func tapGesture(size: CGSize, viewProjection: simd_float4x4) -> some Gesture {
+    private func tapGesture(size: CGSize, viewProjection: simd_float4x4, hostHIPs: Set<Int>) -> some Gesture {
         SpatialTapGesture().onEnded { event in
             // Landmarks first — they're larger, fewer, and easier to mean to tap.
             var bestLandmark: (distance: CGFloat, landmark: Landmark)?
@@ -624,8 +861,15 @@ struct GalaxyMapView: View {
                 selection = .landmark(bestLandmark.landmark)
                 return
             }
+            // The Sun (at the origin) — a real, always-present target with a rich system.
+            if let (sunPoint, _) = project(.zero, viewProjection, size),
+               hypot(sunPoint.x - event.location.x, sunPoint.y - event.location.y) < 22 {
+                selection = .sun
+                return
+            }
             var bestStar: (distance: CGFloat, star: GalaxyStar)?
             for star in stars {
+                if hostsOnly && !(star.hip.map { hostHIPs.contains($0) } ?? false) { continue }
                 guard let (point, _) = project(star.position, viewProjection, size) else { continue }
                 let d = hypot(point.x - event.location.x, point.y - event.location.y)
                 if d < 22, bestStar == nil || d < bestStar!.distance { bestStar = (d, star) }
@@ -709,20 +953,22 @@ struct GalaxyMapView: View {
         for armIndex in 0..<arms {
             let offset = Float(armIndex) * (.pi / 2)
             let major = (armIndex % 2 == 0)
-            let starCount = major ? 1500 : 800
-            let knotCount = major ? 90 : 45
+            // Denser + smaller points read as smooth arm structure rather than
+            // chunky dots; the bloom pass fuses them into a continuous lane.
+            let starCount = major ? 4200 : 2300
+            let knotCount = major ? 150 : 80
             let weight: Float = major ? 1.0 : 0.6
             for _ in 0..<starCount {
                 let r = rInner + rand(0, 1) * (rMax - rInner)
-                let rr = r + gaussian() * (r * 0.05 + 220)
-                let angle = spiralAngle(r) + offset + gaussian() * 0.09
-                let h = gaussian() * (120 + r * 0.010)
-                let bright = max(0.09, 0.52 - 0.30 * (r / rMax)) * weight
+                let rr = r + gaussian() * (r * 0.045 + 200)
+                let angle = spiralAngle(r) + offset + gaussian() * 0.085
+                let h = gaussian() * (115 + r * 0.010)
+                let bright = max(0.07, 0.40 - 0.24 * (r / rMax)) * weight
                 points.append(BackdropPoint(
                     position: place(cos(angle) * rr, sin(angle) * rr, h),
                     colorBucket: armBucket,
-                    baseOpacity: Double(bright) * Double(rand(0.5, 1)),
-                    size: CGFloat(rand(0.8, 2.0))))
+                    baseOpacity: Double(bright) * Double(rand(0.45, 1)),
+                    size: CGFloat(rand(0.5, 1.3))))
             }
             // Pink HII regions studding the arms — the iconic star-forming knots.
             for _ in 0..<knotCount {
@@ -732,36 +978,36 @@ struct GalaxyMapView: View {
                 points.append(BackdropPoint(
                     position: place(cx + gaussian() * 170, cy + gaussian() * 170, gaussian() * 110),
                     colorBucket: hiiBucket,
-                    baseOpacity: Double(rand(0.3, 0.65)) * Double(weight),
-                    size: CGFloat(rand(1.0, 2.2))))
+                    baseOpacity: Double(rand(0.28, 0.6)) * Double(weight),
+                    size: CGFloat(rand(0.8, 1.8))))
             }
         }
 
         // Diffuse disc, exponential falloff — fills between the arms with a faint haze.
-        for _ in 0..<1800 {
+        for _ in 0..<4500 {
             let r = sqrt(rand(0, 1)) * rMax
             let angle = rand(0, 2 * .pi)
-            let h = gaussian() * (110 + r * 0.010)
-            let bright = max(0.03, 0.16 * exp(-r / 8000))
+            let h = gaussian() * (105 + r * 0.010)
+            let bright = max(0.025, 0.13 * exp(-r / 8000))
             points.append(BackdropPoint(
                 position: place(cos(angle) * r, sin(angle) * r, h),
                 colorBucket: discBucket,
                 baseOpacity: Double(bright) * Double(rand(0.4, 1)),
-                size: CGFloat(rand(0.6, 1.4))))
+                size: CGFloat(rand(0.45, 1.0))))
         }
 
         // Central bar + bulge — warm, bright, elongated (the Milky Way is a barred spiral).
-        for _ in 0..<1700 {
+        for _ in 0..<4200 {
             let x = gaussian() * 2700      // elongated along axisA → the bar
             let y = gaussian() * 1050
             let z = gaussian() * 650
             let d = (x * x / (2700 * 2700) + y * y / (1050 * 1050) + z * z / (650 * 650)).squareRoot()
-            let opacity = min(0.85, max(0.12, 0.85 - Double(d) * 0.66))
+            let opacity = min(0.85, max(0.10, 0.85 - Double(d) * 0.66))
             points.append(BackdropPoint(
                 position: place(x, y, z),
                 colorBucket: bulgeBucket,
-                baseOpacity: opacity * Double(rand(0.6, 1)),
-                size: CGFloat(rand(0.9, 2.1))))
+                baseOpacity: opacity * Double(rand(0.55, 1)),
+                size: CGFloat(rand(0.6, 1.6))))
         }
 
         backdrop = points
@@ -803,13 +1049,22 @@ private let starPalette: [Color] = [
 ]
 
 private let backdropPalette: [Color] = [
-    Color(red: 0.72, green: 0.82, blue: 1.0),    // 0 arm
-    Color(red: 1.0, green: 0.48, blue: 0.60),    // 1 HII knot
-    Color(red: 0.60, green: 0.70, blue: 0.95),   // 2 disc haze
-    Color(red: 1.0, green: 0.85, blue: 0.55),    // 3 bar/bulge
+    Color(red: 0.52, green: 0.66, blue: 1.0),    // 0 arm — cool blue (outer)
+    Color(red: 1.0, green: 0.92, blue: 0.80),    // 1 arm — warm white (inner)
+    Color(red: 1.0, green: 0.45, blue: 0.62),    // 2 HII knot (pink star-forming)
+    Color(red: 0.56, green: 0.66, blue: 0.95),   // 3 disc haze
+    Color(red: 1.0, green: 0.83, blue: 0.52),    // 4 bar/bulge (warm gold)
+    Color(red: 1.0, green: 0.95, blue: 0.86),    // 5 halo (pale gold-white)
+    Color(red: 0.62, green: 0.82, blue: 1.0),    // 6 young blue clusters at arm tips
 ]
 
-private let backdropOpacityLevels: [Double] = [0.12, 0.28, 0.5, 0.75]
+/// Dust-lane tint — drawn with normal blending over the bloom to subtract light,
+/// carving the dark veins that thread a galaxy's arms.
+private let backdropDustColor = Color(red: 0.05, green: 0.03, blue: 0.02)
+
+// Eight evenly-spaced levels (level i ≈ midpoint of its 1/8 band) — smoother than
+// the old four-step quantisation, which banded the disc haze.
+private let backdropOpacityLevels: [Double] = [0.0625, 0.1875, 0.3125, 0.4375, 0.5625, 0.6875, 0.8125, 0.9375]
 
 /// Faint crosshair marking the centre of the screen — the point you're flying
 /// toward and steering around in free-fly mode.
@@ -821,6 +1076,38 @@ private struct FlyReticle: View {
             Rectangle().fill(.white.opacity(0.28)).frame(width: 9, height: 1)
         }
         .allowsHitTesting(false)
+    }
+}
+
+/// Non-interactive readout of how far the camera is from Earth (the catalog
+/// origin). Always visible — the through-line that keeps the galaxy's scale legible
+/// as you fly from the Solar neighbourhood out toward the galactic core.
+private struct DistanceReadout: View {
+    let parsecs: Float
+
+    var body: some View {
+        Text(text)
+            .font(.caption.monospacedDigit())
+            .foregroundStyle(.white.opacity(0.38))
+            .shadow(radius: 3)
+            .allowsHitTesting(false)
+    }
+
+    private var text: String {
+        let pc = Double(parsecs)
+        if pc < 0.05 { return "At Earth" }
+        let ly = pc * Astrophysics.lightYearsPerParsec
+        return "\(format(ly)) ly from Earth"
+    }
+
+    private func format(_ ly: Double) -> String {
+        switch ly {
+        case 1_000_000...: return String(format: "%.1fM", ly / 1_000_000)
+        case 10_000...: return String(format: "%.0fk", ly / 1_000)
+        case 100...: return String(format: "%.0f", ly)
+        case 1...: return String(format: "%.0f", ly)
+        default: return String(format: "%.2f", ly)
+        }
     }
 }
 

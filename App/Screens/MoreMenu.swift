@@ -15,7 +15,7 @@ struct MoreMenuView: View {
                 ScrollView {
                     VStack(spacing: 30) {
                         header
-                        section("Explore", [.catalog, .galaxyMap])
+                        section("Explore", [.catalog, .constellations, .galaxyMap])
                         section("Interpret", [.astrology])
                         section(nil, [.about])
                     }
@@ -41,8 +41,9 @@ struct MoreMenuView: View {
                 .font(.system(size: 26))
                 .foregroundStyle(LinearGradient(colors: [.white, .purple.opacity(0.8)],
                                                 startPoint: .top, endPoint: .bottom))
+                .accessibilityHidden(true)
             Text("Astrolabe")
-                .font(.system(size: 40, weight: .bold, design: .serif))
+                .font(.system(.largeTitle, design: .serif)).bold()
                 .foregroundStyle(LinearGradient(colors: [.white, .white.opacity(0.65)],
                                                 startPoint: .top, endPoint: .bottom))
             Text("Chart the heavens")
@@ -77,8 +78,10 @@ struct MoreMenuView: View {
     private func destination(_ screen: AppScreen) -> some View {
         switch screen {
         case .catalog: CatalogView(store: store, exo: exo)
+        case .constellations: ConstellationsView(store: store)
         case .galaxyMap: GalaxyMapView(store: store, exo: exo)
-        default: PlaceholderScreen(screen: screen)
+        case .astrology: AstrologyHomeView(store: store)
+        case .about: AboutView()
         }
     }
 }
@@ -90,7 +93,7 @@ private struct DestinationCard: View {
 
     var body: some View {
         HStack(spacing: 16) {
-            LuminousGlyph(symbol: screen.symbol, tint: screen.tint, size: 52, glyphSize: 21)
+            LuminousGlyph(symbol: screen.symbol, tint: screen.tint, size: 58, glyphSize: 26)
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(screen.title)
@@ -108,7 +111,28 @@ private struct DestinationCard: View {
                 .foregroundStyle(screen.tint.opacity(0.6))
         }
         .padding(16)
-        .luminousSurface(screen.tint, cornerRadius: Theme.panelRadius, glow: 12)
+        .frame(maxWidth: .infinity)
+        .background {
+            ZStack {
+                Rectangle().fill(.ultraThinMaterial)
+                Rectangle().fill(screen.tint.opacity(0.05))
+                // A faint themed sky-figure peeking from the trailing edge — the
+                // "star-chart card" motif that gives each destination its own sky.
+                Image(systemName: screen.watermark)
+                    .font(.system(size: 78, weight: .regular))
+                    .foregroundStyle(screen.tint.opacity(0.10))
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .offset(x: 12)
+            }
+        }
+        // Clip the whole card (background + watermark) so nothing bleeds onto its
+        // neighbours, then draw the rim and glow on top.
+        .clipShape(RoundedRectangle(cornerRadius: Theme.panelRadius))
+        .overlay {
+            RoundedRectangle(cornerRadius: Theme.panelRadius)
+                .strokeBorder(screen.tint.opacity(0.32), lineWidth: 1)
+        }
+        .shadow(color: screen.tint.opacity(0.18), radius: 9)
     }
 }
 
@@ -170,11 +194,12 @@ struct SeededGenerator: RandomNumberGenerator {
 
 /// The future top-level screens. Real content arrives later.
 enum AppScreen: Hashable, CaseIterable {
-    case catalog, galaxyMap, astrology, about
+    case catalog, constellations, galaxyMap, astrology, about
 
     var title: String {
         switch self {
         case .catalog: "Catalog"
+        case .constellations: "Constellations"
         case .galaxyMap: "Galaxy Map"
         case .astrology: "Astrology"
         case .about: "About"
@@ -184,24 +209,38 @@ enum AppScreen: Hashable, CaseIterable {
     var subtitle: String {
         switch self {
         case .catalog: "Search stars, planets & deep-sky objects"
+        case .constellations: "The 88, plus asterisms, lost & cultural figures"
         case .galaxyMap: "Fly through the galaxy in 3D"
         case .astrology: "Charts, zodiac & transits"
-        case .about: "Sources, credits & settings"
+        case .about: "Data sources, credits & licenses"
         }
     }
 
     var symbol: String {
         switch self {
-        case .catalog: "magnifyingglass"
+        case .catalog: "binoculars.fill"
+        case .constellations: "point.3.connected.trianglepath.dotted"
         case .galaxyMap: "globe.americas.fill"
         case .astrology: "moon.stars.fill"
         case .about: "info.circle.fill"
         }
     }
 
+    /// A large, faint sky-figure drawn behind each menu card (Proposal C motif).
+    var watermark: String {
+        switch self {
+        case .catalog: "sparkles"
+        case .constellations: "point.3.connected.trianglepath.dotted"
+        case .galaxyMap: "hurricane"
+        case .astrology: "moon.stars.fill"
+        case .about: "book.closed.fill"
+        }
+    }
+
     var tint: Color {
         switch self {
         case .catalog: .cyan
+        case .constellations: Theme.accent
         case .galaxyMap: .purple
         case .astrology: .yellow
         case .about: .gray
@@ -211,6 +250,7 @@ enum AppScreen: Hashable, CaseIterable {
     var gradient: [Color] {
         switch self {
         case .catalog: [Color(red: 0.2, green: 0.8, blue: 0.95), Color(red: 0.1, green: 0.45, blue: 0.9)]
+        case .constellations: [Color(red: 0.56, green: 0.72, blue: 1.0), Color(red: 0.32, green: 0.45, blue: 0.85)]
         case .galaxyMap: [Color(red: 0.6, green: 0.35, blue: 0.95), Color(red: 0.35, green: 0.2, blue: 0.7)]
         case .astrology: [Color(red: 0.98, green: 0.8, blue: 0.35), Color(red: 0.95, green: 0.5, blue: 0.3)]
         case .about: [Color(white: 0.55), Color(white: 0.32)]
