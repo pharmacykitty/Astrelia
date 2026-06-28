@@ -54,6 +54,19 @@ struct CatalogView: View {
                 }
             }
 
+            disclosure("deepsky", title: "Deep Sky", systemImage: "circle.hexagongrid.fill", tint: .purple,
+                       count: filteredDeepSky.count) {
+                ForEach(deepSkyKinds, id: \.self) { kind in
+                    let items = filteredDeepSky.filter { $0.kind == kind }
+                    disclosure("ds.\(kind)", title: kind.label, systemImage: "sparkle",
+                               tint: .purple.opacity(0.85), count: items.count) {
+                        ForEach(items) { object in
+                            NavigationLink { DeepSkyDetailView(object: object) } label: { deepSkyRow(object) }
+                        }
+                    }
+                }
+            }
+
             ForEach(LandmarkGroup.allCases, id: \.self) { group in
                 let items = filteredLandmarks(in: group)
                 disclosure(group.rawValue, title: group.title, systemImage: group.symbol,
@@ -223,6 +236,41 @@ struct CatalogView: View {
         NavigationLink { StarDetailView(star: star, store: store, exo: exo) } label: { starRow(star) }
     }
 
+    // MARK: Deep sky
+
+    /// Kinds present in the catalog, in a friendly browsing order.
+    private var deepSkyKinds: [DeepSkyObject.Kind] {
+        DeepSkyObject.Kind.allCases.filter { kind in filteredDeepSky.contains { $0.kind == kind } }
+    }
+
+    /// All deep-sky objects (brightest first), filtered by the search query.
+    private var filteredDeepSky: [DeepSkyObject] {
+        let all = DeepSky.all.sorted { ($0.magnitude ?? 99) < ($1.magnitude ?? 99) }
+        guard isSearching else { return all }
+        let q = trimmedQuery
+        return all.filter {
+            $0.id.lowercased().contains(q)
+                || ($0.name?.lowercased().contains(q) ?? false)
+                || ($0.constellation?.lowercased().contains(q) ?? false)
+                || (StarFacts.constellationName($0.constellation)?.lowercased().contains(q) ?? false)
+                || $0.kind.label.lowercased().contains(q)
+        }
+    }
+
+    private func deepSkyRow(_ object: DeepSkyObject) -> some View {
+        Label {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(object.name ?? object.id)
+                Text([object.id, StarFacts.constellationName(object.constellation) ?? object.constellation,
+                      object.magnitude.map { String(format: "mag %.1f", $0) }]
+                        .compactMap { $0 }.joined(separator: " · "))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        } icon: {
+            Image(systemName: "sparkles").foregroundStyle(.purple)
+        }
+    }
+
     private func starRow(_ star: Star) -> some View {
         let title = StarFacts.displayName(for: star)
         let subtitle = [
@@ -369,6 +417,47 @@ private struct StarDetailView: View {
     }
 }
 
+private struct DeepSkyDetailView: View {
+    let object: DeepSkyObject
+
+    var body: some View {
+        DetailScaffold(symbol: symbol, tint: .purple, title: object.name ?? object.id,
+                       subtitle: [object.id, object.kind.label,
+                                  StarFacts.constellationName(object.constellation)]
+                        .compactMap { $0 }.joined(separator: " · ")) {
+            if let m = object.magnitude { DetailRow("Apparent magnitude", String(format: "%.1f", m)) }
+            DetailRow("Type", object.kind.label)
+            if let con = StarFacts.constellationName(object.constellation) { DetailRow("Constellation", con) }
+            if let ly = object.distanceLightYears { DetailRow("Distance", distance(ly)) }
+            if let size = object.angularSizeArcmin {
+                DetailRow("Apparent size", size >= 60 ? String(format: "%.1f°", size / 60) : String(format: "%.0f′", size))
+            }
+            DetailRow("Right ascension", String(format: "%.2f°", object.equatorial.rightAscension.degrees))
+            DetailRow("Declination", String(format: "%.2f°", object.equatorial.declination.degrees))
+        } description: {
+            Text(object.summary)
+        } action: {
+            EmptyView()
+        }
+    }
+
+    private func distance(_ ly: Double) -> String {
+        ly >= 1_000_000 ? String(format: "%.1f million ly", ly / 1_000_000)
+                        : ly >= 10_000 ? String(format: "%.0fk ly", ly / 1_000)
+                                       : String(format: "%.0f ly", ly)
+    }
+
+    private var symbol: String {
+        switch object.kind {
+        case .galaxy: "hurricane"
+        case .globularCluster, .openCluster, .nebulaCluster: "circle.hexagongrid.fill"
+        case .planetaryNebula, .emissionNebula, .reflectionNebula: "smoke.fill"
+        case .supernovaRemnant: "rays"
+        case .other: "sparkle"
+        }
+    }
+}
+
 /// Shared layout for a catalog detail page: header, fact rows, blurb, and a
 /// "View in Galaxy Map" link (omitted when `action` builds an empty view).
 private struct DetailScaffold<Facts: View, Description: View, Action: View>: View {
@@ -401,11 +490,15 @@ private struct DetailScaffold<Facts: View, Description: View, Action: View>: Vie
 
                     description.font(.body).foregroundStyle(.white.opacity(0.8))
 
-                    NavigationLink { action } label: {
-                        Label("View in Galaxy Map", systemImage: "hurricane")
-                            .font(.headline).frame(maxWidth: .infinity)
+                    // The Galaxy-Map link is omitted when the caller passes no action
+                    // (an EmptyView) — e.g. deep-sky objects that aren't placed there.
+                    if Action.self != EmptyView.self {
+                        NavigationLink { action } label: {
+                            Label("View in Galaxy Map", systemImage: "hurricane")
+                                .font(.headline).frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(LuminousButtonStyle(tint: .purple))
                     }
-                    .buttonStyle(LuminousButtonStyle(tint: .purple))
                 }
                 .padding()
             }

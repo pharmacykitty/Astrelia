@@ -12,6 +12,7 @@ struct TonightView: View {
     @State private var statuses: [SkyBodyStatus] = []
     @State private var phase: MoonPhase?
     @State private var asOf = Date()
+    @State private var events: [AstroEvent] = []
     @State private var computing = false
 
     private var sun: SkyBodyStatus? { statuses.first { $0.kind == .sun } }
@@ -33,6 +34,7 @@ struct TonightView: View {
                         planetSection
                     }
                     meteorSection   // calendar-based; shown regardless of location
+                    eventsSection   // ephemeris-based; shown regardless of location
                 }
                 .padding()
                 .padding(.bottom, 40)
@@ -43,6 +45,13 @@ struct TonightView: View {
         .onAppear { if fixedLocation == nil { observer.start() } }
         .onDisappear { observer.stop() }
         .task(id: observer.latitude) { await recompute() }
+        .task {
+            // Events are geocentric (location-independent) and the 60-day search is
+            // heavy, so compute once off the main actor — never in the view body.
+            events = await Task.detached(priority: .utility) {
+                AstroEvent.upcoming(after: Date(), within: 60)
+            }.value
+        }
     }
 
     // MARK: Sections
@@ -160,6 +169,63 @@ struct TonightView: View {
         }
         .padding(.horizontal, 14).padding(.vertical, 11)
         .overlay(alignment: .bottom) { if divider { Divider().background(.white.opacity(0.08)) } }
+    }
+
+    @ViewBuilder
+    private var eventsSection: some View {
+        let shown = Array(events.prefix(8))
+        if !shown.isEmpty {
+            sectionLabel("Upcoming events", "calendar")
+            VStack(spacing: 0) {
+                ForEach(Array(shown.enumerated()), id: \.element.id) { i, event in
+                    eventRow(event, divider: i < shown.count - 1)
+                }
+            }
+            .luminousSurface(.teal)
+        }
+    }
+
+    private func eventRow(_ event: AstroEvent, divider: Bool) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Image(systemName: eventSymbol(event.kind)).font(.caption)
+                .foregroundStyle(.teal).frame(width: 18)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(event.title).foregroundStyle(.white)
+                Text(event.detail).font(.caption).foregroundStyle(.white.opacity(0.55))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer()
+            Text(relativeDay(event.date)).font(.subheadline.weight(.medium))
+                .foregroundStyle(.white.opacity(0.75))
+        }
+        .font(.subheadline)
+        .padding(.horizontal, 14).padding(.vertical, 11)
+        .overlay(alignment: .bottom) { if divider { Divider().background(.white.opacity(0.08)) } }
+    }
+
+    private func eventSymbol(_ kind: AstroEvent.Kind) -> String {
+        switch kind {
+        case .solstice, .equinox: "sun.max"
+        case .newMoon: "moonphase.new.moon"
+        case .firstQuarter: "moonphase.first.quarter"
+        case .fullMoon: "moonphase.full.moon"
+        case .lastQuarter: "moonphase.last.quarter"
+        case .opposition, .conjunction: "circle.circle"
+        case .greatestElongation: "arrow.left.and.right"
+        case .perigee, .apogee: "moon.circle"
+        case .perihelion, .aphelion: "sun.min"
+        case .solarEclipse, .lunarEclipse: "circle.lefthalf.filled"
+        }
+    }
+
+    private func relativeDay(_ date: Date) -> String {
+        let cal = Calendar.current
+        let days = cal.dateComponents([.day], from: cal.startOfDay(for: asOf),
+                                      to: cal.startOfDay(for: date)).day ?? 0
+        if days <= 0 { return "today" }
+        if days == 1 { return "tomorrow" }
+        if days < 7 { return "in \(days) days" }
+        return date.formatted(.dateTime.month(.abbreviated).day())
     }
 
     private func sectionLabel(_ text: String, _ symbol: String) -> some View {
