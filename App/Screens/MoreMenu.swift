@@ -210,7 +210,7 @@ enum AppScreen: Hashable, CaseIterable {
 
     var subtitle: String {
         switch self {
-        case .tonight: "What's up in your sky right now"
+        case .tonight: "Moon phase, planets & meteor showers up now"
         case .catalog: "Search stars, planets & deep-sky objects"
         case .constellations: "The 88, plus asterisms, lost & cultural figures"
         case .galaxyMap: "Fly through the galaxy in 3D"

@@ -14,6 +14,8 @@ struct AstrolabeApp: App {
             } else if ProcessInfo.processInfo.arguments.contains("-snapshotStar") {
                 NavigationStack { StarSnapshotHarness() }
                     .preferredColorScheme(.dark)
+            } else if ProcessInfo.processInfo.arguments.contains("-snapshotMenu") {
+                MoreMenuView(store: StarCatalogStore(), exo: ExoplanetStore())
             } else if ProcessInfo.processInfo.arguments.contains("-snapshotTonight") {
                 NavigationStack {
                     TonightView(fixedLocation: GeographicLocation(latitude: .degrees(40.71),
