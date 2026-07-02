@@ -160,6 +160,10 @@ enum SourceCatalog {
                         detail: "Coordinates, distances, and sizes for the curated Galaxy Map landmarks (nebulae, clusters, black holes, satellite galaxies) draw on standard astronomical catalogues via SIMBAD/CDS and NASA/JPL.",
                         license: "Reference",
                         url: "https://simbad.cds.unistra.fr"),
+            SourceEntry(name: "Black-hole visualization — NASA SVS",
+                        detail: "The Sagittarius A* gravitational-lensing model and the dive sequence (shadow, photon ring, Doppler-beamed disc, aberration, the staged plunge and its timings) are a real-time Schwarzschild approximation inspired by NASA's \"Beyond the Brink\" supercomputer visualization (Goddard SVS, J. Schnittman). Sgr A*'s mass, horizon size, and distance are real; the rendering is physically motivated but stylized.",
+                        license: "Inspiration / reference",
+                        url: "https://svs.gsfc.nasa.gov/14585"),
         ]),
         SourceGroup(title: "Deep-Sky Imagery", tint: .pink, entries: [
             SourceEntry(name: "Nebula shapes — ESA/Hubble & NASA",

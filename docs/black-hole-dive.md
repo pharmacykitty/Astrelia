@@ -5,70 +5,62 @@
 > render it in Metal** inside the existing Galaxy Map renderer. Keep in sync with
 > `docs/galaxy-map.md` and the renderer in `App/Screens/Galaxy/`.
 >
-> ⏸️ **REMOVED FROM THE APP (2026-07-01) — this doc is retained as the design of record.**
-> Both the standalone dive cutscene and the in-map lensing black hole were pulled back out
-> (the user wasn't sure about the feature "for now"). What was deleted: `BlackHoleDive.metal`,
-> `BlackHoleDiveRenderer.swift`, `BlackHoleDiveView.swift`, `GalaxyLensing.metal`, the
-> `-blackHoleDive`/`-galaxyBH` debug routes, and the `GalaxyMetalRenderer`/`GalaxyMapView`
-> lensing hooks (Sgr A* is back to its sprite model). Everything below is verified-working
-> design; to rebuild, re-add the files and re-wire per the "In-map lensing" notes — and
-> remember to `xcodegen generate` after adding the new `.metal`/`.swift` files.
+> ✅ **REBUILT & IN THE APP (2026-07-02) — verified on simulator, frame-by-frame.**
+> (The 2026-07-01 build was removed, then rebuilt from this doc the next day as the
+> **easter egg**: free-fly across ~6.5 rs of Sgr A\* and the plunge takes over. No button,
+> no card action — you have to fly in.) Current architecture:
 >
-> **Status — Milestone 1 built & verified on simulator.** Files:
-> `App/Screens/Galaxy/BlackHoleDive.metal` (full-screen raymarched lensing shader),
-> `BlackHoleDiveRenderer.swift` (`MTKView` pass + `DiveTimeline` + `DiveController`),
-> `BlackHoleDiveView.swift` (SwiftUI host + numbers→intuition HUD).
+> - **In-map lensing, always on** — `App/Screens/Galaxy/GalaxyLensing.metal` +
+>   `GalaxyMetalRenderer`. The sprite scene renders to an offscreen colour+depth target;
+>   a full-screen post-pass marches **Schwarzschild null geodesics** (rs-units, adaptive
+>   step, 240 cap) for rays near the hole and applies the **closed-form weak-field
+>   deflection (α ≈ 2rs/b)** for every other ray, so bending decays smoothly to zero with
+>   no seam. Escaped rays sample the offscreen scene where they now point (the real galaxy
+>   lenses into Einstein rings), falling back to a **2048×1024 equirect panorama** baked
+>   from the hole (`bake_vertex/fragment`, re-baked per scene version) + a procedural warm
+>   bulge ambient (which fades with β so the plunge isn't washed out). The procedural disc:
+>   temp ramp, per-pixel Keplerian **Doppler beaming**, gravitational redshift, and
+>   band-noise that **carves filament gaps** (alpha driven by the texture, so the disc reads
+>   as fire-streams, not fog). Shadow = capture; photon ring falls out of the geometry.
+>   `GalaxyCamera` carries the hole (Sgr A\* `positionParsecs`, stylised `rs` = the
+>   landmark's catalogued ~0.92 pc, disc 3–10 rs in the galactic plane). Sprite-side,
+>   Sgr A\* keeps only a warm beacon (`GalaxyMapView` `.blackHole` case); microquasars keep
+>   the old sprite model.
+> - **Performance** — near the hole every pixel marches, so scene+lens render into
+>   **internal reduced-resolution textures** (`renderScale` 0.3 sim / 0.55 device) and a
+>   final `blit_fragment` upscales to the native drawable. Never change the MTKView's
+>   `contentScaleFactor` for this (it corrupts SwiftUI's update graph — AttributeGraph
+>   cycle — and wedges the window); the internal-texture route has no UIKit side effects.
+>   Far from the hole the lens pass is engaged only while its influence region spans ≥ ~a
+>   pixel (else the sprite path renders straight to the drawable, zero overhead).
+> - **The dive is renderer-owned** — `DiveChannel` (imperative box) hands the fly-loop's
+>   trigger to the renderer; `applyDiveCamera()` recomputes pose + `DiveStage` uniforms
+>   per display-link frame as **pure functions of wall-clock time** (`DiveTimeline` in
+>   `BlackHoleDive.swift`). SwiftUI only narrates (HUD at ~4 Hz). This matters twice: the
+>   60 Hz @State camera churn can wedge SwiftUI entirely (observed on simulator), and the
+>   dive must not depend on a SwiftUI render to start or advance. Time-anchored progress
+>   (stalls can't speed the fall), ~30 s total.
+> - **Beats** (`DiveTimeline.stage`): β 0.19→0.992 with **inverse relativistic aberration**
+>   (screen ray → rest-frame ray, negative β — the forward map blacks the frame out; the
+>   inverse shrinks the shadow while the sky crowds bright around it) + Doppler headlight;
+>   equirect `bakeMix` ramps in before heavy aberration; render distance eases to
+>   **8.4 → 7.0 rs** (portrait FOV: the shadow is wider than the screen inside ~8 rs);
+>   `aperture` collapses the outside universe after the crossing (p = 0.60); `spaghetti`
+>   radial stretch + global redshift inside; white flash → **eject**: the camera rewinds to
+>   an orbit outside, facing the hole, with an epilogue caption ("Nothing that enters ever
+>   leaves — the simulation has been rewound."). A β-gated **soft tone-map knee** keeps the
+>   photon ring white-hot while the stacked boosts roll off filmically. Reduce Motion
+>   softens aberration + stretch. HUD: speed %c, real-km distance, time-dilation ×, and the
+>   12.8 s countdown; Skip button always present.
+> - **Debug**: `-galaxyBH` opens the map at Sgr A\* (70 pc); `-galaxyBH -dive` spawns
+>   free-fly at 9 rs inbound so the trigger fires; add `-dumpDive` to write the lens
+>   output to Documents every 2.5 s (the GPU's ground truth — sim chrome can wedge
+>   mid-dive while the Metal layer plays on).
 >
-> **★ ARCHITECTURE CHANGE — the black hole now lives *in* the Galaxy Map, not a cutscene.**
-> The full-screen `BlackHoleDiveView` cutscene was jarring: it cut to a *separate* lensing
-> scene with its own black hole, unrelated to the one you fly toward. It's been replaced by
-> a real gravitational-lensing object at the galactic centre (Sgr A\*), rendered as a
-> **post-pass in the Galaxy Map's own renderer** (`GalaxyLensing.metal`). The sprite scene
-> renders to an offscreen texture; the lensing pass bends that image around the hole's real
-> world position and draws the disc / photon ring / shadow in place, so flying in is one
-> continuous shot. See "In-map lensing" below. The cutscene files (`BlackHoleDive.metal`,
-> `BlackHoleDiveRenderer/View.swift`) remain only behind the `-blackHoleDive` debug arg.
->
-> **In-map lensing.** `GalaxyMetalRenderer` gained an offscreen colour+depth target and a
-> `lens_vertex`/`lens_fragment` post-pass. `GalaxyCamera` carries the hole (`holePos` =
-> Sgr A\*'s `positionParsecs`, `holeRs`/`diskInner`/`diskOuter` stylised in parsecs, disc
-> normal = `Galactic.north`). The shader marches Schwarzschild photon paths in the hole's
-> frame (rs-units), samples the **offscreen galaxy** screen-space for escaped rays (so the
-> real galaxy lenses into Einstein rings), draws the procedural disc + photon ring, and
-> blacks out the shadow. An influence-radius cull keeps it cheap when the hole is small on
-> screen (the common case → straight passthrough). Debug: **`-galaxyBH`** opens the map ~90 pc
-> from Sgr A\*.
->
-> Working: geodesic-approx lensing (shadow, photon ring, lensed disk halo that wraps the
-> frame near the horizon), procedural disk (temp ramp + Doppler beaming + gravitational
-> redshift + Keplerian swirl), procedural starfield, and the staged timeline (slow
-> approach → 99% c crossing → redshift → white flash → spaghetti stretch → fade) with live
-> speed/distance/dilation/countdown. **Pacing notes:** progress is **time-anchored** in
-> `DiveController` (`progress = anchorProgress + (now − anchorTime)/duration`), so duplicate
-> render passes / stalls can't speed it up; the **render distance is held at ≥ 6.5 rs**
-> (`DiveTimeline.renderDist`) while the HUD narrates the full plunge, because any closer the
-> shadow's angular size swallows the whole FOV and the screen just goes black — the crossing
-> is sold by effects, not by flying into the all-black shadow. The in-map Sgr A\* model
-> (`GalaxyMapView` `.blackHole` case) uses Schwarzschild-proportioned shadow/photon-ring/ISCO
-> radii (2.6 / ~3 rs), a thin Doppler-beamed disc, and a hard dark event-horizon overlay.
->
-> **Milestone 2 done (verified on simulator):** (1) **Relativistic aberration** — the
-> initial ray is transformed by the inverse aberration formula (`aberrate()` in the shader)
-> using `β·0.7`, so as the plunge speeds up the whole sky bunches toward the forward
-> direction; plus Doppler beaming/blue-white shift on the background. (2) **Real-galaxy
-> background** — at dive start the renderer bakes the live `GalaxyScene` light sprites
-> (`scene.additive` + `scene.landmarkLight`) into a 2048×1024 **equirectangular** panorama
-> seen from the black hole (`bakeSky` + self-contained `bake_vertex`/`bake_fragment`, min
-> angular size so distant stars stay visible), which the lensing fragment samples for
-> escaped rays. The bent light forms real **Einstein rings / multiple images** of the actual
-> Milky Way around the shadow. (Equirect over cube: trivial seam-free `atan2/asin` sampling,
-> no handedness, self-contained shaders.) The `GalaxyMapView` cover passes `scene` +
-> Sgr A\*'s `positionParsecs`; the `-blackHoleDive` launch arg uses `BlackHoleDiveView.debugScene()`
-> (a synthetic starfield) so the bake is verifiable headlessly, else falls back to `proceduralBG`.
->
-> **Not yet done (Milestone 3):** Kerr spin / frame-dragging (asymmetric shadow), softer
-> non-blocky baked stars + longitude-seam wrap, device-GPU perf tuning (reduced-res target,
-> adaptive step cap), and on-device verification of the free-fly trigger + the real-galaxy bake.
+> **Not yet done:** on-device verification (trigger, perf, HUD liveness), Kerr spin /
+> frame-dragging, bake longitude-seam wrap, and the SwiftUI AttributeGraph wedge under
+> 60 Hz flight churn (pre-existing; the dive routes around it, manual free-fly on the
+> simulator still repros it).
 
 This is the marquee "tap reveals real science" moment: the user free-flies to the
 real Sgr A\* marker and chooses to dive. We swap the sprite-billboard black hole

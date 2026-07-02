@@ -225,6 +225,27 @@ without core blowout.
 
 ---
 
+## Sgr A* — gravitational lensing + the dive easter egg
+
+Sagittarius A\* is the one object **not** drawn with sprites: `GalaxyLensing.metal` is a
+full-screen post-pass over the sprite scene (rendered to an offscreen target) that marches
+Schwarzschild null geodesics near the hole and applies the closed-form weak-field
+deflection everywhere else — a real black shadow, photon ring, Doppler-beamed procedural
+disc, and Einstein-lensed images of the actual rendered galaxy (screen-space samples, with
+a baked 2048×1024 equirect panorama as the out-of-frame fallback). Near the hole the
+whole frame is ray-marched, so scene+lens render at reduced internal resolution and a blit
+upscales (never via `contentScaleFactor` — that wedges SwiftUI's update graph). Sprite-side
+only a warm beacon remains (`.blackHole` case); microquasars keep the sprite model.
+
+**The easter egg:** free-flying across ~6.5 rs triggers a ~30 s staged plunge — renderer-
+owned (`DiveChannel` → `applyDiveCamera`, pure functions of wall-clock time), with inverse
+relativistic aberration, the universe collapsing at the crossing, tidal stretch, a white
+flash, and an eject-with-epilogue. Full design + build notes: **`docs/black-hole-dive.md`**.
+Debug: `-galaxyBH` (map at the hole), `-galaxyBH -dive` (auto-plunge), `-dumpDive`
+(write lens frames to Documents).
+
+---
+
 ## Spatial index (culling + picking)
 
 `CelestialCore.PointOctree` (pure, `Sendable`, unit-tested vs. brute force) is built once

@@ -11,6 +11,7 @@ import CelestialCore
 enum GalaxyMapFocus {
     case landmark(Landmark)
     case star(Int)
+    case blackHole(dive: Bool)   // `-galaxyBH` debug route: open at Sgr A* (optionally plunging)
 }
 
 struct GalaxyMapView: View {
@@ -56,6 +57,16 @@ struct GalaxyMapView: View {
     @State private var flyTask: Task<Void, Never>?
     private let flySpeed: Float = 1540   // parsecs/second at full throttle
 
+    // Black-hole dive easter egg: free-flying across Sgr A*'s horizon threshold
+    // hands the camera to `DiveTimeline` for one staged, time-anchored plunge
+    // (BlackHoleDive.swift), rendered by the same in-map lensing pass.
+    @State private var diveStart: Date?
+    @State private var diveProgress: Double = 0
+    @State private var diveEntry: (eye: SIMD3<Float>, yaw: Float, pitch: Float)?
+    @State private var showDiveEpilogue = false
+    @State private var diveChannel = DiveChannel()   // imperative handoff to the renderer
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     @State private var selection: MapSelection?
 
     /// What the user has tapped — the Sun, a real star, or a curated landmark.
@@ -90,7 +101,8 @@ struct GalaxyMapView: View {
                 // Gestures live on the render layer (below the overlay) so taps on
                 // overlay buttons interact with the button, not the stars behind it.
                 GalaxyMetalView(scene: scene, sceneVersion: sceneVersion,
-                                camera: makeCamera(aspect: Float(size.width / max(size.height, 1)), size: size))
+                                camera: makeCamera(aspect: Float(size.width / max(size.height, 1)), size: size),
+                                diveChannel: diveChannel)
                     .contentShape(Rectangle())
                     .gesture(dragGesture)
                     .simultaneousGesture(zoomGesture)
@@ -98,9 +110,16 @@ struct GalaxyMapView: View {
 
                 // Metal draws the bodies; labels, the Sun caption and the selection
                 // ring stay vector (crisp text) in this lightweight Canvas on top.
-                metalAnnotations(size: size, viewProjection: viewProjection)
-
-                overlay(size: size, viewProjection: viewProjection, safe: .deviceSafeArea)
+                // The dive is cinema: all chrome yields to the narration HUD.
+                if diveStart == nil {
+                    metalAnnotations(size: size, viewProjection: viewProjection)
+                    overlay(size: size, viewProjection: viewProjection, safe: .deviceSafeArea)
+                } else {
+                    DiveHUD(progress: diveProgress) { endDive() }
+                }
+                if showDiveEpilogue {
+                    DiveEpilogue()
+                }
             }
         }
         .ignoresSafeArea()
@@ -431,9 +450,65 @@ struct GalaxyMapView: View {
         let view = lookAt(eye: .zero, center: center - cameraEye, up: SIMD3(0, 1, 0))
         let projection = perspective(fovy: fieldOfView, aspect: aspect, near: 0.05, far: 200000)
         let focal = 1 / tan(fieldOfView / 2)
-        return GalaxyCamera(viewProj: projection * view, eye: cameraEye,
-                            halfHeightFocal: Float(size.height / 2) * focal, viewSize: size)
+        var camera = GalaxyCamera(viewProj: projection * view, eye: cameraEye,
+                                  halfHeightFocal: Float(size.height / 2) * focal, viewSize: size)
+
+        // Sgr A* gravitational lensing: engage the post-pass when the camera is inside
+        // the hole's influence sphere, or the hole is ahead and its influence region
+        // spans at least ~a pixel. Everywhere else the pass is skipped entirely.
+        if let hole = Self.sgrA {
+            let rs = Float(hole.radiusParsecs)     // stylised rs — see the sprite case note
+            let holePos = hole.positionParsecs
+            let f = -dir
+            let toHole = holePos - cameraEye
+            let dist = simd_length(toHole)
+            let influence = rs * 20
+            let projectedPx = influence / max(dist, 1) * camera.halfHeightFocal
+            if dist < influence {
+                // Inside the march zone every pixel integrates a geodesic — drop
+                // the drawable resolution (hard on the simulator's software Metal,
+                // gently on device) and let the warp hide the softness.
+                #if targetEnvironment(simulator)
+                camera.renderScale = 0.30
+                #else
+                camera.renderScale = 0.55
+                #endif
+            }
+            if dist < influence || (simd_dot(toHole, f) > 0 && projectedPx > 0.75) {
+                var side = simd_cross(f, SIMD3<Float>(0, 1, 0))
+                side = simd_length(side) < 1e-4 ? SIMD3(1, 0, 0) : simd_normalize(side)
+                camera.holePos = holePos
+                camera.holeRs = rs
+                camera.diskInner = rs * 3          // ISCO
+                camera.diskOuter = rs * 10
+                camera.diskNormal = Galactic.north
+                camera.right = side
+                camera.up = simd_cross(side, f)
+                camera.forward = f
+                camera.tanHalfH = tan(fieldOfView / 2)
+                camera.tanHalfW = camera.tanHalfH * aspect
+                if let diveStart, let entry = diveEntry {
+                    // The renderer owns the dive camera (display-link smooth, no
+                    // 60 Hz @State churn) — hand it the entry pose and the clock.
+                    camera.diveStart = diveStart
+                    camera.diveEntryEye = entry.eye
+                    let look = SIMD3<Float>(cos(entry.pitch) * sin(entry.yaw),
+                                            sin(entry.pitch),
+                                            cos(entry.pitch) * cos(entry.yaw))
+                    camera.diveEntryForward = -look
+                    camera.diveReduceMotion = reduceMotion
+                    camera.fovY = fieldOfView
+                    camera.aspect = aspect
+                }
+            }
+        }
+        return camera
     }
+
+    /// The one landmark rendered by the lensing pass instead of sprites. Its
+    /// "Schwarzschild radius" is stylised to the catalogued extent (~0.9 pc — the
+    /// true rs is sub-pixel at galaxy scale); shadow/ring/ISCO proportions are physical.
+    private static let sgrA = Landmarks.all.first { $0.id == "sgr-a" }
 
     // MARK: Metal scene
 
@@ -775,13 +850,23 @@ struct GalaxyMapView: View {
                 }
 
             case .blackHole:
-                // Proportions follow Schwarzschild geometry: the dark shadow ≈ 2.6 rs and
-                // the disc's inner edge (ISCO) ≈ 3 rs, so the shadow sits just inside a thin
-                // bright photon ring, itself just inside the disc's inner rim. The absolute
-                // size R is stylised — the true horizon is sub-pixel at galaxy scale — but
-                // the shadow/ring/disc ratios are physical. Up close you fly in (easter egg).
-                let isSgr = lm.id == "sgr-a"
-                let dim = isSgr ? 0.85 : 1.0
+                // Sgr A* is drawn by the gravitational-lensing post-pass
+                // (GalaxyLensing.metal): a real Schwarzschild shadow, photon ring and
+                // Doppler disc, computed per pixel — flying in triggers the dive easter
+                // egg. Sprite-side it keeps only a soft warm beacon so the core still
+                // glows from across the galaxy (the lens pass engages as its influence
+                // region reaches pixel size; the beacon's light then lenses too).
+                if lm.id == "sgr-a" {
+                    gas(center, physR * 3.2, SIMD4(1.0, 0.72, 0.40, 1), 0.08, 1)
+                    gas(center, physR * 1.4, SIMD4(1.0, 0.90, 0.72, 1), 0.14, 1)
+                    continue
+                }
+                // Microquasars keep the sprite model. Proportions follow Schwarzschild
+                // geometry: the dark shadow ≈ 2.6 rs and the disc's inner edge (ISCO)
+                // ≈ 3 rs, so the shadow sits just inside a thin bright photon ring,
+                // itself just inside the disc's inner rim. The absolute size R is
+                // stylised — the true horizon is sub-pixel at galaxy scale — but the
+                // shadow/ring/disc ratios are physical.
                 let R = max(8, physR * 10)            // disc outer radius
                 let shadowR = R * 0.26                // event-horizon shadow (2.6 rs)
                 let ringR = R * 0.30                  // photon ring (~1.5 rs lensed to ~2.6)
@@ -803,7 +888,7 @@ struct GalaxyMapView: View {
                     let tangent = -Float(sin(ang)) * ex + Float(cos(ang)) * ey
                     let dop = 0.5 + 0.5 * Double(simd_dot(tangent, beam))   // 0 receding → 1 approaching
                     let beamBoost = 0.25 + 1.6 * dop * dop                  // relativistic limb brightening
-                    gas(pos, R * 0.05, col, (0.5 - 0.28 * t) * beamBoost * dim, 1)
+                    gas(pos, R * 0.05, col, (0.5 - 0.28 * t) * beamBoost, 1)
                 }
                 // Bright photon ring hugging the shadow.
                 for _ in 0..<170 {
@@ -811,17 +896,15 @@ struct GalaxyMapView: View {
                     let dir = Float(cos(ang)) * ex + Float(sin(ang)) * ey
                     let tangent = -Float(sin(ang)) * ex + Float(cos(ang)) * ey
                     let dop = 0.5 + 0.5 * Double(simd_dot(tangent, beam))
-                    gas(center + dir * ringR, R * 0.02, SIMD4(1, 0.97, 0.88, 1), (0.45 + 0.75 * dop) * dim, 0.8)
+                    gas(center + dir * ringR, R * 0.02, SIMD4(1, 0.97, 0.88, 1), 0.45 + 0.75 * dop, 0.8)
                 }
-                gas(center, shadowR * 2.6, SIMD4(1, 0.62, 0.32, 1), 0.10 * dim, 1)   // soft hot halo
-                // Relativistic jets for the microquasars (not quiescent Sgr A*).
-                if !isSgr {
-                    for s in [-1.0, 1.0] {
-                        for i in 0..<40 {
-                            let f = Float(i) / 40
-                            let pos = center + ez * Float(s) * R * (0.3 + f * 3.0) + (ex * Float(gauss()) + ey * Float(gauss())) * R * 0.05 * (0.4 + f)
-                            gas(pos, R * 0.05 * (0.5 + f), SIMD4(0.6, 0.8, 1, 1), 0.16 * (1 - Double(f)) * dim, 1)
-                        }
+                gas(center, shadowR * 2.6, SIMD4(1, 0.62, 0.32, 1), 0.10, 1)   // soft hot halo
+                // Relativistic jets.
+                for s in [-1.0, 1.0] {
+                    for i in 0..<40 {
+                        let f = Float(i) / 40
+                        let pos = center + ez * Float(s) * R * (0.3 + f * 3.0) + (ex * Float(gauss()) + ey * Float(gauss())) * R * 0.05 * (0.4 + f)
+                        gas(pos, R * 0.05 * (0.5 + f), SIMD4(0.6, 0.8, 1, 1), 0.16 * (1 - Double(f)), 1)
                     }
                 }
                 // Dark event-horizon shadow: a hard black disc that occludes the disc light
@@ -895,12 +978,19 @@ struct GalaxyMapView: View {
                 let now = Date()
                 let dt = Float(min(0.05, now.timeIntervalSince(last)))
                 last = now
+                if diveStart != nil {
+                    advanceDive(now)
+                    try? await Task.sleep(for: .milliseconds(200))   // narration only
+                    continue
+                }
                 if throttle != 0 {
                     // Square the throttle (keeping its sign) so low settings give
                     // fine, slow movement near a star and full throttle still crosses
                     // the galaxy quickly.
                     let speed = (throttle < 0 ? -1 : 1) * throttle * throttle * flySpeed
+                    let previous = eye
                     eye += (-lookDirection) * (speed * dt)
+                    checkDiveTrigger(from: previous, to: eye)
                 }
                 try? await Task.sleep(for: .milliseconds(16))
             }
@@ -909,11 +999,89 @@ struct GalaxyMapView: View {
 
     private func exitFlyMode() {
         guard flyMode else { return }
+        if diveStart != nil { endDive(); return }   // the fly toggle doubles as an escape hatch
         target = eye - lookDirection * distance   // resume orbit around a point ahead
         flyMode = false
         throttle = 0
         throttling = false
         flyTask?.cancel()
+    }
+
+    // MARK: Black-hole dive (easter egg)
+
+    /// Distance from a point to the segment [a, b] — the trigger test must catch a
+    /// horizon crossing that happens *between* two 16 ms flight ticks.
+    private func segmentDistance(_ a: SIMD3<Float>, _ b: SIMD3<Float>, to point: SIMD3<Float>) -> Float {
+        let ab = b - a
+        let len2 = simd_length_squared(ab)
+        let t = len2 < 1e-9 ? 0 : max(0, min(1, simd_dot(point - a, ab) / len2))
+        return simd_distance(point, a + ab * t)
+    }
+
+    /// Free-flying from outside across ~6.5 rs of Sgr A* commits you to the plunge.
+    private func checkDiveTrigger(from previous: SIMD3<Float>, to current: SIMD3<Float>) {
+        guard diveStart == nil, let hole = Self.sgrA else { return }
+        let triggerR = Float(hole.radiusParsecs) * 6.5
+        guard simd_distance(previous, hole.positionParsecs) > triggerR,
+              segmentDistance(previous, current, to: hole.positionParsecs) <= triggerR else { return }
+        startDive()
+    }
+
+    private func startDive() {
+        guard Self.sgrA != nil else { return }
+        diveEntry = (eye, yaw, pitch)   // the renderer derives the infall axis from this pose
+        diveProgress = 0
+        diveStart = Date()
+        showDiveEpilogue = false
+        throttle = 0
+        throttling = false
+        selection = nil
+        closeOptions()
+        // Hand the dive to the renderer directly — it must run even if SwiftUI
+        // never renders again until it's over.
+        diveChannel.entryEye = eye
+        diveChannel.entryForward = -lookDirection
+        diveChannel.reduceMotion = reduceMotion
+        diveChannel.start = diveStart
+    }
+
+    /// Narration tick while diving. The renderer computes the actual 60 fps camera
+    /// from the wall clock (`applyDiveCamera`); SwiftUI only needs coarse progress
+    /// for the HUD copy — high-rate @State churn here starves SwiftUI rendering.
+    private func advanceDive(_ now: Date) {
+        guard let start = diveStart else { return }
+        let p = min(1, now.timeIntervalSince(start) / DiveTimeline.duration)
+        diveProgress = (p * 120).rounded() / 120   // ~0.25 s steps for the countdown
+        if p >= 1 { endDive() }
+    }
+
+    /// Ends (or skips) the dive: nothing escapes, so the simulation rewinds — back
+    /// to an orbit just outside, facing the hole you fell into.
+    private func endDive() {
+        guard diveStart != nil, let hole = Self.sgrA else { return }
+        diveStart = nil
+        diveChannel.start = nil
+        diveProgress = 0
+        flyTask?.cancel()
+        flyMode = false
+        throttle = 0
+        throttling = false
+        let rs = Float(hole.radiusParsecs)
+        target = hole.positionParsecs
+        distance = rs * 40
+        zoomAnchor = distance
+        if let entry = diveEntry {
+            let back = simd_normalize(entry.eye - hole.positionParsecs)
+            yaw = atan2(back.x, back.z)
+            pitch = asin(max(-1, min(1, back.y)))
+        }
+        diveEntry = nil
+        selection = .landmark(hole)
+        withAnimation(.easeIn(duration: 0.6)) { showDiveEpilogue = true }
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(8))
+            withAnimation(.easeOut(duration: 1.2)) { showDiveEpilogue = false }
+        }
     }
 
     private func project(_ position: SIMD3<Float>, _ viewProjection: simd_float4x4, _ size: CGSize) -> (CGPoint, Float)? {
@@ -948,6 +1116,22 @@ struct GalaxyMapView: View {
             focusApplied = true
             selection = .star(gs)
             animateCamera(to: gs.position, distance: 40, duration: 1.6)
+        case .blackHole(let dive):
+            guard !stars.isEmpty, let hole = Self.sgrA else { return }
+            focusApplied = true
+            // A deterministic vantage for screenshots: park just above the disc plane
+            // so the far side lenses into the over/under halo. `dive` starts free-fly
+            // just outside the trigger, plunging straight in.
+            let fromHole = simd_normalize(simd_normalize(-hole.positionParsecs) + Galactic.north * 0.28)
+            target = hole.positionParsecs
+            yaw = atan2(fromHole.x, fromHole.z)
+            pitch = asin(max(-1, min(1, fromHole.y)))
+            distance = dive ? Float(hole.radiusParsecs) * 9 : 70
+            zoomAnchor = distance
+            if dive {
+                enterFlyMode()
+                throttle = 0.05   // a slow, visible approach before the trigger fires
+            }
         }
     }
 
@@ -997,7 +1181,8 @@ struct GalaxyMapView: View {
             .onChanged { value in
                 // Ignore stray single-finger tracking while a two-finger throttle
                 // gesture is in progress, so the view doesn't drift as you set speed.
-                guard !throttling else { return }
+                // The dive owns the camera outright.
+                guard !throttling, diveStart == nil else { return }
                 flightTask?.cancel()
                 let dx = Float(value.translation.width - dragPrevious.width)
                 let dy = Float(value.translation.height - dragPrevious.height)
@@ -1011,7 +1196,7 @@ struct GalaxyMapView: View {
     private var zoomGesture: some Gesture {
         MagnificationGesture()
             .onChanged { value in
-                guard !flyMode else { return }   // in fly mode two fingers set throttle, not zoom
+                guard !flyMode, diveStart == nil else { return }   // in fly mode two fingers set throttle, not zoom
                 flightTask?.cancel()
                 distance = min(60000, max(2, zoomAnchor / Float(value)))
             }
@@ -1020,6 +1205,7 @@ struct GalaxyMapView: View {
 
     private func tapGesture(size: CGSize, viewProjection: simd_float4x4, hostHIPs: Set<Int>) -> some Gesture {
         SpatialTapGesture().onEnded { event in
+            guard diveStart == nil else { return }   // no picking mid-plunge
             // Landmarks first — they're larger, fewer, and easier to mean to tap.
             var bestLandmark: (distance: CGFloat, landmark: Landmark)?
             for landmark in Landmarks.all {

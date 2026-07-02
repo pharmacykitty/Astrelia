@@ -19,6 +19,9 @@ struct AstrolabeApp: App {
             } else if ProcessInfo.processInfo.arguments.contains("-snapshotStar") {
                 NavigationStack { StarSnapshotHarness() }
                     .preferredColorScheme(.dark)
+            } else if ProcessInfo.processInfo.arguments.contains("-galaxyBH") {
+                // Debug: open the Galaxy Map at Sgr A* (add `-dive` to free-fly straight in).
+                GalaxyBlackHoleHarness(dive: ProcessInfo.processInfo.arguments.contains("-dive"))
             } else if ProcessInfo.processInfo.arguments.contains("-snapshotTonight") {
                 NavigationStack {
                     TonightView(fixedLocation: GeographicLocation(latitude: .degrees(40.71),
@@ -40,5 +43,19 @@ struct AstrolabeApp: App {
             }
         }
         .modelContainer(for: SavedChart.self)
+    }
+}
+
+/// Debug host for `-galaxyBH`: the Galaxy Map focused on Sagittarius A*, with its
+/// own stores (the normal app path owns these in `ContentView`).
+private struct GalaxyBlackHoleHarness: View {
+    let dive: Bool
+    @State private var store = StarCatalogStore()
+    @State private var exo = ExoplanetStore()
+
+    var body: some View {
+        GalaxyMapView(store: store, exo: exo, focus: .blackHole(dive: dive))
+            .task { store.loadIfNeeded(); exo.loadIfNeeded() }
+            .preferredColorScheme(.dark)
     }
 }
