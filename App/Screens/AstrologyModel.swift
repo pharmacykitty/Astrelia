@@ -37,7 +37,7 @@ final class AstrologyModel: NSObject, CLLocationManagerDelegate {
         let settings = ChartSettings(
             houseSystem: .placidus,
             zodiac: .tropical,
-            bodies: AstroBody.allCases // Sun, Moon, Mercury–Pluto, nodes
+            bodies: AstroBody.standard // Sun, Moon, Mercury–Pluto, nodes
         )
         return NatalChart(at: JulianDay(Date()), location: loc, settings: settings)
     }

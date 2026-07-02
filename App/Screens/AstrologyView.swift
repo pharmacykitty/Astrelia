@@ -19,7 +19,7 @@ struct SkyNowView: View {
                                         stars: SphereStars.bright(from: store),
                                         constellations: store?.constellations ?? [])
                 } label: {
-                    Image(systemName: "globe")
+                    Image(systemName: "globe").accessibilityLabel("View in 3D sphere")
                 }
                 .tint(AppScreen.astrology.tint)
             )

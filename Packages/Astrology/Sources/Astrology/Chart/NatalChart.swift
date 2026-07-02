@@ -13,7 +13,7 @@ public struct ChartSettings: Sendable, Hashable {
         houseSystem: HouseSystem = .placidus,
         zodiac: Zodiac = .tropical,
         orbs: OrbPolicy = .default,
-        bodies: [AstroBody] = AstroBody.allCases
+        bodies: [AstroBody] = AstroBody.standard
     ) {
         self.houseSystem = houseSystem
         self.zodiac = zodiac

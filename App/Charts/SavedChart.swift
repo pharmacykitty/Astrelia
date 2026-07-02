@@ -73,7 +73,7 @@ extension SavedChart {
     }
 
     var settings: ChartSettings {
-        ChartSettings(houseSystem: houseSystem, zodiac: zodiac, bodies: AstroBody.allCases)
+        ChartSettings(houseSystem: houseSystem, zodiac: zodiac, bodies: AstroBody.standard)
     }
 
     var location: GeographicLocation {

@@ -61,6 +61,12 @@ public struct CelestialCoreEphemeris: EphemerisProvider {
         case .uranus: return Planets.apparentEclipticLongitude(.uranus, at: jd)
         case .neptune: return Planets.apparentEclipticLongitude(.neptune, at: jd)
         case .pluto: return Planets.apparentEclipticLongitude(.pluto, at: jd)
+        case .chiron: return MinorBodies.apparentEclipticLongitude(.chiron, at: jd)
+        case .ceres: return MinorBodies.apparentEclipticLongitude(.ceres, at: jd)
+        case .pallas: return MinorBodies.apparentEclipticLongitude(.pallas, at: jd)
+        case .juno: return MinorBodies.apparentEclipticLongitude(.juno, at: jd)
+        case .vesta: return MinorBodies.apparentEclipticLongitude(.vesta, at: jd)
+        case .blackMoonLilith: return MinorBodies.blackMoonLilith(at: jd)
         }
     }
 

@@ -48,6 +48,19 @@ import CelestialCore
         }
     }
 
+    @Test func articleAgreesWithVowel() {
+        #expect(Interpretation.planetInSign(.sun, .scorpio).contains("in an intense"))   // vowel
+        #expect(Interpretation.planetInSign(.sun, .taurus).contains("in a steady"))      // consonant
+        // No "in a <vowel>" slips through for any planet/sign.
+        for b in AstroBody.allCases {
+            for s in ZodiacSign.allCases {
+                let t = Interpretation.planetInSign(b, s)
+                #expect(!t.contains("a intense") && !t.contains("a original")
+                        && !t.contains("a adventurous") && !t.contains("a imaginative"))
+            }
+        }
+    }
+
     @Test func readsNaturally() {
         #expect(Interpretation.planetInSign(.sun, .leo)
             .contains("Sun is in Leo"))

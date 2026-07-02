@@ -54,12 +54,38 @@ Interaction: auto-rotates (~60 s/turn); drag to turn; tap to pause. Geometry is
 built once per chart and cached (`.task(id:)`); only the cheap projection runs per
 frame, so the ~900 stars + constellations stay smooth.
 
+## Also done
+
+- **House great-circles** — each cusp's ecliptic-longitude meridian (through the
+  ecliptic poles), segmenting the globe like orange slices; angular cusps brighter.
+- **House numerals** — Roman I–XII at each house's mid-longitude on the ecliptic
+  (nudged just inside the band so they don't collide with the zodiac glyphs).
+- **Label de-collision** — planet glyph labels are spread to avoid overlap in tight
+  stelliums, with a thin leader line back to the dot when moved.
+- **Planet ecliptic latitude** — bodies are plotted at their real β (ayanamsa-invariant).
+- **Milky Way band** — galactic-equator glow behind the stars.
+
+### Comprehension & motion pass (★ "I don't know how to read it" fix)
+
+- **Aspect storytelling** — chords are coloured by harmony (blue flowing / red tense /
+  white conjunction / purple minor); the single **tightest aspect gently pulses**;
+  tapping a chord opens its reading; selecting a planet **dims every aspect it
+  isn't part of**.
+- **Guided tour** — an auto-advancing narration (menu → *Guided tour*) that spotlights
+  the Sun, Moon, Rising, then the tightest aspect, each with a one-line plain-language
+  caption banner and step dots.
+- **Time travel** — a scrubber (menu → *Time travel*) shifts the sky ±24 h and a play
+  button runs it; the geometry is rebuilt at `chart` + offset, so the stars, Sun,
+  Moon, planets **and** houses wheel in true diurnal motion. The camera holds still
+  while time plays so the motion you see is the sky turning, not the camera. Live
+  time/offset readout + "Now" reset. `effectiveChart` recomputes a `NatalChart` at the
+  offset; the rebuild key quantises the offset to ~3-minute steps.
+
 ## Still deferred
 
-- **House great-circles** (the GIF draws full house frames, not just cusp ticks).
-- **Label de-collision** for tight planet stelliums (e.g. the 1971 Scorpio cluster).
-- **Planet ecliptic latitude** (we plot β=0; real β < a few ° except Moon/Pluto).
-- **Milky Way band**, and a **Metal** renderer if Canvas costs too much at 120 fps.
+- **Depth-sorted occlusion** — additive glow has no depth test, so far-side stars
+  shine through near-side gas/globe (we dim by hemisphere as an approximation).
+- A **Metal** renderer if Canvas costs too much at 120 fps.
 
 ## Why this is the moat
 

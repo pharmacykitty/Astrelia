@@ -33,8 +33,18 @@ struct ChartListView: View {
         .navigationTitle("Saved Charts")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            if charts.count >= 2 {
+                ToolbarItem(placement: .topBarLeading) {
+                    NavigationLink {
+                        RelationshipsView(store: store)
+                    } label: {
+                        Label("Compare", systemImage: "heart.circle")
+                    }
+                    .tint(tint)
+                }
+            }
             ToolbarItem(placement: .topBarTrailing) {
-                Button { editing = true } label: { Image(systemName: "plus") }
+                Button("New chart", systemImage: "plus") { editing = true }
                     .tint(tint)
             }
         }
