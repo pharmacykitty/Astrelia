@@ -124,7 +124,7 @@ static float4 bh_post(float3 col, float a, float3 dir, float3 fwd, constant Lens
     if (u.redshiftG > 0.001) {                             // everything reddens and dies
         float lum = dot(col, float3(0.30, 0.55, 0.15));
         col = mix(col, lum * float3(1.0, 0.28, 0.10), u.redshiftG);
-        col *= 1.0 - 0.75 * u.redshiftG;
+        col *= 1.0 - u.redshiftG;                          // → true black at 1.0
     }
     // Speed-gated soft knee: mid-plunge the stacked boosts (disc images × beaming ×
     // headlight) clip the whole frame to white — roll the wash off filmically while

@@ -33,6 +33,8 @@
 >   `blit_fragment` upscale to the native drawable — so frame time stays flat all the
 >   way in (without the budget, the approach band just outside the influence radius
 >   marched nearly the full native frame and froze the app in `currentDrawable`).
+>   When the camera rests ~0.6 s the budget doubles (**idle-resolve**): motion hides
+>   the softness, a parked view gets crispness back the moment you stop.
 >   Never change the MTKView's `contentScaleFactor` for this (it corrupts SwiftUI's
 >   update graph — AttributeGraph cycle — and wedges the window); the internal-texture
 >   route has no UIKit side effects. Far from the hole the lens pass is engaged only

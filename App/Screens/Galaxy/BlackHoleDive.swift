@@ -71,7 +71,9 @@ enum DiveTimeline {
                     + 1.1 * (ramp(p, 0.56, 0.62) - ramp(p, 0.65, 0.72))
         s.aperture = ramp(p, crossing, crossing + 0.12)          // the universe closes behind
         s.spaghetti = ramp(p, 0.66, 0.92) * motion
-        s.redshift = 0.25 * ramp(p, 0.5, 0.62) + 0.67 * ramp(p, 0.66, 0.95)
+        // Reaches 1.0 just before the flash: the last light dies completely — the
+        // white-out rises from true black.
+        s.redshift = 0.25 * ramp(p, 0.5, 0.62) + 0.75 * ramp(p, 0.66, 0.95)
         s.flash = ramp(p, 0.965, 0.995)
         return s
     }

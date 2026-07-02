@@ -1059,7 +1059,7 @@ struct GalaxyMapView: View {
         throttling = false
         let rs = Float(hole.radiusParsecs)
         target = hole.positionParsecs
-        distance = rs * 40
+        distance = rs * 13   // just outside the trigger — literally "the moment before you crossed"
         zoomAnchor = distance
         if let entry = diveEntry {
             let back = simd_normalize(entry.eye - hole.positionParsecs)

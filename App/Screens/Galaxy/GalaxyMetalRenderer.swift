@@ -173,6 +173,10 @@ final class GalaxyMetalRenderer: NSObject {
     // so the swirl phase never jumps when the rate changes.
     private var warpedTime: Double = 0
     private var lastFrameTime = CACurrentMediaTime()
+    // Idle-resolve: when the camera rests, the lens re-renders at higher resolution
+    // (motion hides the budget scale's softness; a parked view shouldn't be crunchy).
+    private var lastPose: (eye: SIMD3<Float>, fwd: SIMD3<Float>)?
+    private var lastMoveTime = CACurrentMediaTime()
 
     override init() {
         let device = MTLCreateSystemDefaultDevice()
@@ -514,7 +518,7 @@ final class GalaxyMetalRenderer: NSObject {
     /// marches nearly the full native frame and parks the main thread in
     /// `currentDrawable` — the "freeze as you get close". Floored to 0.1 steps so
     /// the offscreen textures only reallocate at discrete approach distances.
-    private func lensScale(drawableSize: CGSize) -> CGFloat {
+    private func lensScale(drawableSize: CGSize, idle: Bool) -> CGFloat {
         let area = drawableSize.width * drawableSize.height
         guard area > 1, camera.holeRs > 0 else { return 1 }
         #if targetEnvironment(simulator)
@@ -532,7 +536,8 @@ final class GalaxyMetalRenderer: NSObject {
             marchArea = min(area, .pi * rPx * rPx)
         }
         guard marchArea > budget else { return 1 }
-        let s = sqrt(budget / marchArea)
+        var s = sqrt(budget / marchArea)
+        if idle { s = min(1, s * 2) }     // resting camera: spend frame time on crispness
         return max(0.3, (s * 10).rounded(.down) / 10)
     }
 
@@ -556,7 +561,16 @@ final class GalaxyMetalRenderer: NSObject {
         // internal textures at a budgeted pixel size and a final blit upscales to the
         // native drawable. All internal: the MTKView/layer never change scale (doing
         // that mid-flight corrupts SwiftUI's update graph and wedges the window).
-        let scale = lensScale(drawableSize: view.drawableSize)
+        let diving = (diveChannel?.start ?? camera.diveStart) != nil
+        let moved = lastPose.map {
+            simd_distance($0.eye, camera.eye) > camera.holeRs * 0.002 + 1e-5 ||
+            simd_dot($0.fwd, camera.forward) < 0.999995
+        } ?? true
+        if moved || diving {
+            lastMoveTime = now
+            lastPose = (camera.eye, camera.forward)
+        }
+        let scale = lensScale(drawableSize: view.drawableSize, idle: now - lastMoveTime > 0.6)
         let reduced = scale < 0.999
         let lensSize = CGSize(width: (view.drawableSize.width * scale).rounded(.down),
                               height: (view.drawableSize.height * scale).rounded(.down))
