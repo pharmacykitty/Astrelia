@@ -1,7 +1,7 @@
 import Foundation
 import CelestialCore
 
-/// Descriptive and derived data for stars. The catalog ships ~25k stars; we can't
+/// Descriptive and derived data for stars. The catalog ships ~110k stars; we can't
 /// hand-write prose for each, so this layer provides two things:
 ///
 /// 1. **Derived facts for every star** — surface temperature (from the B−V colour
@@ -172,11 +172,12 @@ enum StarFacts {
         if lum.contains("supergiant") {
             return "A supergiant in the final act of its life — vastly luminous and short-lived, destined to explode as a supernova."
         }
-        if lum.contains("giant") {   // covers "giant" and "bright giant"
-            return "A giant past its main-sequence prime: its core hydrogen spent, it has swelled and cooled, on its way to shedding its outer layers."
-        }
+        // "subgiant" before "giant": the former contains the latter as a substring.
         if lum.contains("subgiant") {
             return "A subgiant just leaving the main sequence, beginning to swell as the hydrogen in its core runs low."
+        }
+        if lum.contains("giant") {   // covers "giant" and "bright giant"
+            return "A giant past its main-sequence prime: its core hydrogen spent, it has swelled and cooled, on its way to shedding its outer layers."
         }
 
         // Main sequence (or unannotated) — lifetime and fate scale with mass, which
@@ -291,6 +292,70 @@ enum StarFacts {
     static func summary(for properName: String?) -> String? {
         guard let name = properName else { return nil }
         return descriptions[name]
+    }
+
+    // MARK: Generated prose for the rest of the catalog
+
+    /// A synthesized lead sentence for the ~99.6% of catalog stars with no curated
+    /// prose, so every detail page opens with words instead of a wall of numbers.
+    /// Built only from this star's catalog data — spectral class (colour + giant/
+    /// supergiant/dwarf), constellation, and distance — with no invented specifics.
+    static func generatedSummary(for star: Star) -> String {
+        let name = displayName(for: star)
+        var sentence = "\(name) is \(describeKind(star))"
+        if let con = constellationName(star.constellation) { sentence += " in \(con)" }
+        if let pc = star.distanceParsecs, pc > 0 {
+            sentence += ", some \(compact(pc * 3.2616)) light-years away"
+        }
+        return sentence + "."
+    }
+
+    /// "a yellow G-type star", "an orange K-type giant", "a white-dwarf remnant" —
+    /// the kind phrase (with article) from the spectral string, falling back to a
+    /// colour-from-temperature guess, then a bare "a star".
+    private static func describeKind(_ star: Star) -> String {
+        if let raw = star.spectralType?.trimmingCharacters(in: .whitespaces),
+           let cls = raw.uppercased().first(where: { "OBAFGKM".contains($0) }) {
+            let colour = colourWord(forClass: cls)
+            if let lc = luminosityClass(in: raw) {
+                // Order matters: "subgiant"/"supergiant" both contain "giant", so the
+                // more specific labels must be tested before the bare "giant".
+                if lc.contains("white dwarf") { return "a white-dwarf remnant" }
+                if lc.contains("supergiant") { return "\(colour) \(cls)-type supergiant" }
+                if lc.contains("subgiant") { return "\(colour) \(cls)-type subgiant" }
+                if lc.contains("giant") { return "\(colour) \(cls)-type giant" }   // covers bright giant
+            }
+            return "\(colour) \(cls)-type star"
+        }
+        if let t = temperatureKelvin(colorIndex: star.colorIndex) { return "\(colourWord(forTemp: t)) star" }
+        return "a star"
+    }
+
+    /// Colour adjective (with article) for a Harvard spectral class letter.
+    private static func colourWord(forClass cls: Character) -> String {
+        switch cls {
+        case "O": return "a blue"
+        case "B": return "a blue-white"
+        case "A": return "a white"
+        case "F": return "a yellow-white"
+        case "G": return "a yellow"
+        case "K": return "an orange"
+        case "M": return "a red"
+        default: return "a"
+        }
+    }
+
+    /// Colour adjective (with article) from an effective temperature, for the rare
+    /// star with a colour index but no spectral type.
+    private static func colourWord(forTemp t: Double) -> String {
+        switch t {
+        case 10000...: return "a blue-white"
+        case 7500..<10000: return "a white"
+        case 6000..<7500: return "a yellow-white"
+        case 5200..<6000: return "a yellow"
+        case 3700..<5200: return "an orange"
+        default: return "a red"
+        }
     }
 
     private static let descriptions: [String: String] = [

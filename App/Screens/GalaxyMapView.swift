@@ -28,7 +28,13 @@ struct GalaxyMapView: View {
     @State private var stars: [GalaxyStar] = []
     @State private var backdrop: [BackdropPoint] = []   // stylized Milky Way (art, not catalogued)
     @State private var backdropDust: [BackdropPoint] = []   // dark dust lanes, carved over the glow
+    @State private var octree: PointOctree?             // spatial index over star positions (frustum cull + picking)
     @State private var flightTask: Task<Void, Never>?
+
+    // Metal renderer (Phase 7) — the only renderer. The scene is rebuilt (and
+    // `version` bumped) whenever the catalogue or art changes.
+    @State private var scene = GalaxyScene()
+    @State private var sceneVersion = 0
 
     // Orbit camera (parsecs).
     @State private var yaw: Float = 0.6
@@ -81,15 +87,18 @@ struct GalaxyMapView: View {
                 LinearGradient(colors: [Color(red: 0.01, green: 0.01, blue: 0.05), .black],
                                startPoint: .top, endPoint: .bottom)
 
-                // Gestures live on the canvas layer (below the overlay) so taps on
+                // Gestures live on the render layer (below the overlay) so taps on
                 // overlay buttons interact with the button, not the stars behind it.
-                Canvas { context, _ in
-                    draw(in: context, size: size, viewProjection: viewProjection, hostHIPs: hostHIPs)
-                }
-                .contentShape(Rectangle())
-                .gesture(dragGesture)
-                .simultaneousGesture(zoomGesture)
-                .simultaneousGesture(tapGesture(size: size, viewProjection: viewProjection, hostHIPs: hostHIPs))
+                GalaxyMetalView(scene: scene, sceneVersion: sceneVersion,
+                                camera: makeCamera(aspect: Float(size.width / max(size.height, 1)), size: size))
+                    .contentShape(Rectangle())
+                    .gesture(dragGesture)
+                    .simultaneousGesture(zoomGesture)
+                    .simultaneousGesture(tapGesture(size: size, viewProjection: viewProjection, hostHIPs: hostHIPs))
+
+                // Metal draws the bodies; labels, the Sun caption and the selection
+                // ring stay vector (crisp text) in this lightweight Canvas on top.
+                metalAnnotations(size: size, viewProjection: viewProjection)
 
                 overlay(size: size, viewProjection: viewProjection, safe: .deviceSafeArea)
             }
@@ -97,8 +106,9 @@ struct GalaxyMapView: View {
         .ignoresSafeArea()
         .toolbar(.hidden, for: .navigationBar)
         .task(id: store.catalog?.count ?? 0) {
-            buildStars(); buildBackdrop(); applyInitialFocusIfNeeded()
+            buildStars(); buildBackdrop(); buildScene(); applyInitialFocusIfNeeded()
         }
+        .onChange(of: exo.hostHIPs.count) { buildScene() }
         .onDisappear { flightTask?.cancel(); flyTask?.cancel() }
         .fullScreenCover(item: $shownSystem) { SystemView(system: $0) }
         .fullScreenCover(isPresented: $showCatalog) {
@@ -114,373 +124,40 @@ struct GalaxyMapView: View {
         }
     }
 
-    // MARK: Rendering
 
-    private func draw(in context: GraphicsContext, size: CGSize, viewProjection: simd_float4x4, hostHIPs: Set<Int>) {
-        let focal = Double(1 / tan(fieldOfView / 2))
-        let halfH = Double(size.height) * 0.5
-        let maxDim = Double(max(size.width, size.height))
-
-        // Grand luminous core: three stacked gradients — a wide amber halo, a gold
-        // mid-glow, and a hot near-white nucleus — so the galactic centre reads as a
-        // radiant heart rather than a flat blob. The disc/arm haze comes from the
-        // bloom pass below, following the true spiral/bar shape and viewing angle.
-        if showMilkyWay, let (cp, cdepth) = project(Galactic.centerPosition, viewProjection, size), cdepth > 0 {
-            let pxPerPc = halfH * focal / Double(cdepth)
-            func disc(_ rad: CGFloat, _ colors: [Color]) {
-                guard rad > 4 else { return }
-                context.drawLayer { layer in
-                    layer.blendMode = .plusLighter
-                    layer.fill(Path(ellipseIn: CGRect(x: cp.x - rad, y: cp.y - rad, width: rad * 2, height: rad * 2)),
-                               with: .radialGradient(Gradient(colors: colors), center: cp, startRadius: 0, endRadius: rad))
+    /// Vector annotations for the Metal path — labels, the Sun caption and the
+    /// selection ring (crisp text the GPU sprite layer doesn't draw). Projected on the
+    /// CPU with the same world view-projection the picker uses.
+    private func metalAnnotations(size: CGSize, viewProjection: simd_float4x4) -> some View {
+        Canvas { context, _ in
+            let focal = Double(1 / tan(fieldOfView / 2))
+            if let (sp, _) = project(.zero, viewProjection, size) {
+                context.draw(Text("Sol").font(.system(size: 10, weight: .semibold)).foregroundStyle(.orange),
+                             at: CGPoint(x: sp.x, y: sp.y + 14))
+            }
+            var labelRects: [CGRect] = []
+            for lm in Landmarks.all {
+                guard let (p, depth) = project(lm.positionParsecs, viewProjection, size), depth > 0 else { continue }
+                let screenRadius = lm.radiusParsecs * (Double(size.height) * 0.5) * focal / Double(depth)
+                let r = CGFloat(max(2.0, min(screenRadius, Double(max(size.width, size.height)) * 1.5)))
+                if p.x < -r - 30 || p.x > size.width + r + 30 || p.y < -r - 30 || p.y > size.height + r + 30 { continue }
+                let labelY = p.y + CGFloat(min(Double(r) + 8, 70))
+                let text = Text(lm.name).font(.system(size: 9, weight: .medium)).foregroundStyle(lm.type.color.opacity(0.95))
+                let resolved = context.resolve(text)
+                let m = resolved.measure(in: CGSize(width: 160, height: 40))
+                let rect = CGRect(x: p.x - m.width / 2, y: labelY - m.height / 2, width: m.width, height: m.height)
+                if rect.minX > 2, rect.maxX < size.width - 2, rect.minY > 2, rect.maxY < size.height - 2,
+                   !labelRects.contains(where: { $0.intersects(rect) }) {
+                    labelRects.append(rect.insetBy(dx: -3, dy: -3))
+                    context.draw(resolved, at: CGPoint(x: p.x, y: labelY))
                 }
             }
-            disc(CGFloat(min(maxDim * 1.4, 6500 * pxPerPc)),       // broad amber halo
-                 [Color(red: 1.0, green: 0.74, blue: 0.42).opacity(0.16), .clear])
-            disc(CGFloat(min(maxDim * 0.8, 2600 * pxPerPc)),       // gold mid-glow
-                 [Color(red: 1.0, green: 0.86, blue: 0.6).opacity(0.40),
-                  Color(red: 1.0, green: 0.8, blue: 0.5).opacity(0.12), .clear])
-            disc(CGFloat(min(maxDim * 0.32, 900 * pxPerPc)),       // hot near-white nucleus
-                 [Color(red: 1.0, green: 0.98, blue: 0.9).opacity(0.7),
-                  Color(red: 1.0, green: 0.9, blue: 0.7).opacity(0.25), .clear])
-        }
-
-        // Stylized Milky Way point field, drawn in two additive passes for a
-        // photographic look: a heavy-blur *bloom* that fuses the points into smooth
-        // luminous structure following the real arms/bar, then a crisp pass for
-        // defined cores. Points are batched by colour + opacity level (a few dozen
-        // fills, built once and reused by both passes); off-screen/sub-pixel culled.
-        if showMilkyWay {
-            var paths = Array(repeating: Array(repeating: Path(), count: backdropOpacityLevels.count),
-                              count: backdropPalette.count)
-            for point in backdrop {
-                guard let (p, depth) = project(point.position, viewProjection, size) else { continue }
-                if p.x < -6 || p.x > size.width + 6 || p.y < -6 || p.y > size.height + 6 { continue }
-                let r = point.size * CGFloat(min(3.4, max(0.6, Double(800 / depth))))
-                if r < 0.4 { continue }
-                let lvl = min(backdropOpacityLevels.count - 1, Int(point.baseOpacity * Double(backdropOpacityLevels.count)))
-                paths[point.colorBucket][lvl].addEllipse(in: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2))
-            }
-            context.drawLayer { layer in            // bloom — soft structure-following haze
-                layer.addFilter(.blur(radius: 8))
-                layer.blendMode = .plusLighter
-                for c in backdropPalette.indices {
-                    for l in backdropOpacityLevels.indices {
-                        layer.fill(paths[c][l], with: .color(backdropPalette[c].opacity(backdropOpacityLevels[l] * 0.55)))
-                    }
-                }
-            }
-            // Dust lanes — dark filaments along the inner arm edges, drawn with normal
-            // blending so they *subtract* light from the bloom (carving the galaxy's
-            // characteristic dark veins). Batched by opacity into a handful of fills.
-            var dustPaths = Array(repeating: Path(), count: backdropOpacityLevels.count)
-            for d in backdropDust {
-                guard let (p, depth) = project(d.position, viewProjection, size) else { continue }
-                if p.x < -8 || p.x > size.width + 8 || p.y < -8 || p.y > size.height + 8 { continue }
-                let r = d.size * CGFloat(min(4.0, max(0.6, Double(900 / depth))))
-                if r < 0.5 { continue }
-                let lvl = min(backdropOpacityLevels.count - 1, Int(d.baseOpacity * Double(backdropOpacityLevels.count)))
-                dustPaths[lvl].addEllipse(in: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2))
-            }
-            context.drawLayer { layer in
-                layer.addFilter(.blur(radius: 4))
-                for l in backdropOpacityLevels.indices {
-                    layer.fill(dustPaths[l], with: .color(backdropDustColor.opacity(min(0.9, backdropOpacityLevels[l] * 1.4))))
-                }
-            }
-            context.drawLayer { layer in            // crisp cores
-                layer.addFilter(.blur(radius: 1.1))
-                layer.blendMode = .plusLighter
-                for c in backdropPalette.indices {
-                    for l in backdropOpacityLevels.indices {
-                        layer.fill(paths[c][l], with: .color(backdropPalette[c].opacity(backdropOpacityLevels[l])))
-                    }
-                }
+            if let selection, let (point, _) = project(selection.position, viewProjection, size) {
+                context.stroke(Path(ellipseIn: CGRect(x: point.x - 12, y: point.y - 12, width: 24, height: 24)),
+                               with: .color(.white), lineWidth: 1.5)
             }
         }
-
-        // Real stars: one path per colour bucket → 6 fills total, with off-screen +
-        // sub-pixel culling and an overall cap for level-of-detail.
-        var starPaths = Array(repeating: Path(), count: starPalette.count)
-        var glowPath = Path()
-        var hostBadges = Path()         // rings around stars with known planets
-        var drawn = 0
-        for star in stars {
-            let isHost = star.hip.map { hostHIPs.contains($0) } ?? false
-            if hostsOnly && !isHost { continue }
-            guard let (p, depth) = project(star.position, viewProjection, size) else { continue }
-            if p.x < -3 || p.x > size.width + 3 || p.y < -3 || p.y > size.height + 3 { continue }
-            let r = star.baseSize * CGFloat(min(3.0, max(0.4, 150 / depth)))
-            if r < 0.5 && !hostsOnly { continue }
-            if star.magnitude < 1.5 {
-                let g = r * 3
-                glowPath.addEllipse(in: CGRect(x: p.x - g, y: p.y - g, width: g * 2, height: g * 2))
-            }
-            // In hosts-only mode give every host a floor size so distant ones stay visible.
-            let rr = hostsOnly ? max(r, 1.6) : r
-            starPaths[star.colorBucket].addEllipse(in: CGRect(x: p.x - rr, y: p.y - rr, width: rr * 2, height: rr * 2))
-            if isHost {
-                let br = max(rr + 3, 5)
-                hostBadges.addEllipse(in: CGRect(x: p.x - br, y: p.y - br, width: br * 2, height: br * 2))
-            }
-            drawn += 1
-            if drawn >= 14000 { break }
-        }
-        context.fill(glowPath, with: .color(.white.opacity(0.12)))
-        for i in starPalette.indices {
-            context.fill(starPaths[i], with: .color(starPalette[i].opacity(0.95)))
-        }
-        context.stroke(hostBadges, with: .color(Color(red: 0.4, green: 0.95, blue: 0.9).opacity(0.8)), lineWidth: 1)
-
-        // The Sun at the origin.
-        if let (sunPoint, _) = project(.zero, viewProjection, size) {
-            context.fill(Path(ellipseIn: CGRect(x: sunPoint.x - 7, y: sunPoint.y - 7, width: 14, height: 14)),
-                         with: .color(.orange.opacity(0.25)))
-            context.fill(Path(ellipseIn: CGRect(x: sunPoint.x - 3, y: sunPoint.y - 3, width: 6, height: 6)),
-                         with: .color(.orange))
-            context.draw(Text("Sol").font(.system(size: 10, weight: .semibold)).foregroundStyle(.orange),
-                         at: CGPoint(x: sunPoint.x, y: sunPoint.y + 14))
-        }
-
-        // Deep-sky landmarks — rendered at true physical scale: distant ones are
-        // small markers, but they grow into glowing clouds / star clusters as you
-        // approach, sized by their real radius. Plus a de-cluttered label.
-        var labelRects: [CGRect] = []
-        for landmark in Landmarks.all {
-            guard let (p, depth) = project(landmark.positionParsecs, viewProjection, size), depth > 0 else { continue }
-            let screenRadius = landmark.radiusParsecs * (Double(size.height) * 0.5) * focal / Double(depth)
-            let r = CGFloat(max(2.0, min(screenRadius, Double(max(size.width, size.height)) * 1.5)))
-            if p.x < -r - 30 || p.x > size.width + r + 30 || p.y < -r - 30 || p.y > size.height + r + 30 { continue }
-
-            if r >= 4 {
-                drawLandmark(context, landmark, at: p, radius: r, viewProjection: viewProjection, size: size)
-            } else {
-                let color = landmark.type.color
-                context.fill(Path(ellipseIn: CGRect(x: p.x - 8, y: p.y - 8, width: 16, height: 16)), with: .color(color.opacity(0.13)))
-                context.fill(Path(ellipseIn: CGRect(x: p.x - 4, y: p.y - 4, width: 8, height: 8)), with: .color(color.opacity(0.45)))
-                context.fill(Path(ellipseIn: CGRect(x: p.x - 1.6, y: p.y - 1.6, width: 3.2, height: 3.2)), with: .color(.white.opacity(0.95)))
-            }
-
-            let labelY = p.y + CGFloat(min(Double(r) + 8, 70))
-            let text = Text(landmark.name).font(.system(size: 9, weight: .medium)).foregroundStyle(landmark.type.color.opacity(0.95))
-            let resolved = context.resolve(text)
-            let m = resolved.measure(in: CGSize(width: 160, height: 40))
-            let rect = CGRect(x: p.x - m.width / 2, y: labelY - m.height / 2, width: m.width, height: m.height)
-            if rect.minX > 2, rect.maxX < size.width - 2, rect.minY > 2, rect.maxY < size.height - 2,
-               !labelRects.contains(where: { $0.intersects(rect) }) {
-                labelRects.append(rect.insetBy(dx: -3, dy: -3))
-                context.draw(resolved, at: CGPoint(x: p.x, y: labelY))
-            }
-        }
-
-        // Selection ring + label.
-        if let selection, let (point, _) = project(selection.position, viewProjection, size) {
-            context.stroke(Path(ellipseIn: CGRect(x: point.x - 12, y: point.y - 12, width: 24, height: 24)),
-                           with: .color(.white), lineWidth: 1.5)
-        }
-    }
-
-    /// Draws a landmark at true scale: a glowing nebula cloud, star cluster, galaxy
-    /// haze, or black-hole glow, sized to its projected physical radius.
-    private func drawLandmark(_ context: GraphicsContext, _ landmark: Landmark, at p: CGPoint, radius r: CGFloat,
-                              viewProjection: simd_float4x4, size: CGSize) {
-        let color = landmark.type.color
-        func rect(_ c: CGPoint, _ rad: CGFloat) -> CGRect { CGRect(x: c.x - rad, y: c.y - rad, width: rad * 2, height: rad * 2) }
-        // Stable per-object seed (String.hashValue is randomised per launch, so don't use it).
-        var rng = SeededGenerator(seed: landmark.id.unicodeScalars.reduce(UInt64(1469598103)) { $0 &* 31 &+ UInt64($1.value) })
-        func rnd(_ a: Double, _ b: Double) -> Double { Double.random(in: a...b, using: &rng) }
-        func gauss() -> Double {
-            let u1 = Double.random(in: 1e-6...1, using: &rng), u2 = Double.random(in: 0...1, using: &rng)
-            return (-2 * log(u1)).squareRoot() * cos(2 * .pi * u2)
-        }
-
-        switch landmark.type {
-        case .emissionNebula, .supernovaRemnant, .planetaryNebula:
-            drawNebula(context, landmark, at: p, radius: r, viewProjection: viewProjection, size: size)
-
-        case .openCluster, .globularCluster:
-            let globular = landmark.type == .globularCluster
-            // Member stars live in 3D, scattered in a sphere around the cluster's real
-            // position, then projected individually — so the cluster rotates and
-            // parallaxes with the camera instead of being a flat decal on the screen.
-            let center = landmark.positionParsecs
-            let physR = Float(landmark.radiusParsecs)
-            let n = globular ? 220 : 60
-            context.drawLayer { layer in
-                layer.blendMode = .plusLighter
-                if globular {
-                    layer.fill(Path(ellipseIn: rect(p, r * 0.6)),
-                               with: .radialGradient(Gradient(colors: [color.opacity(0.28), .clear]),
-                                                     center: p, startRadius: 0, endRadius: r * 0.6))
-                }
-                for _ in 0..<n {
-                    // Random direction on the unit sphere.
-                    let z = rnd(-1, 1)
-                    let t = rnd(0, 2 * .pi)
-                    let rxy = (1 - z * z).squareRoot()
-                    let dir = SIMD3<Float>(Float(cos(t) * rxy), Float(sin(t) * rxy), Float(z))
-                    // Globulars concentrate toward the core; open clusters fill the sphere.
-                    let frac = globular ? min(1, abs(gauss()) * 0.42) : pow(rnd(0, 1), 1.0 / 3.0)
-                    let world = center + dir * (physR * Float(frac))
-                    guard let (sp, depth) = project(world, viewProjection, size), depth > 0 else { continue }
-                    if sp.x < -4 || sp.x > size.width + 4 || sp.y < -4 || sp.y > size.height + 4 { continue }
-                    let dr = CGFloat(max(0.6, min(3.0, Double(r) * rnd(0.025, 0.055))))
-                    layer.fill(Path(ellipseIn: rect(sp, dr)), with: .color(.white.opacity(rnd(0.6, 0.95))))
-                }
-            }
-
-        case .galaxy:
-            context.drawLayer { layer in
-                layer.blendMode = .plusLighter
-                let rx = r, ry = r * 0.6
-                layer.fill(Path(ellipseIn: CGRect(x: p.x - rx, y: p.y - ry, width: rx * 2, height: ry * 2)),
-                           with: .radialGradient(Gradient(colors: [color.opacity(0.32), .clear]),
-                                                 center: p, startRadius: 0, endRadius: r))
-                for _ in 0..<90 {
-                    let ang = rnd(0, 2 * .pi), rad = rnd(0, 1)
-                    let sp = CGPoint(x: p.x + CGFloat(cos(ang) * rad * Double(rx)), y: p.y + CGFloat(sin(ang) * rad * Double(ry)))
-                    layer.fill(Path(ellipseIn: rect(sp, CGFloat(rnd(0.5, 1.4)))), with: .color(.white.opacity(0.7)))
-                }
-            }
-
-        case .blackHole:
-            let radius = max(6, min(r, 46))
-            context.drawLayer { layer in
-                layer.blendMode = .plusLighter
-                layer.fill(Path(ellipseIn: rect(p, radius)),
-                           with: .radialGradient(Gradient(colors: [color.opacity(0.55), .clear]),
-                                                 center: p, startRadius: radius * 0.18, endRadius: radius))
-                layer.fill(Path(ellipseIn: rect(p, max(2, radius * 0.14))), with: .color(.white))
-            }
-        }
-    }
-
-    /// Renders a nebula as a genuine volumetric cloud rather than a flat decal: gas
-    /// "puffs" are distributed in real 3D space around the object's position and
-    /// projected individually, so the cloud has depth, internal structure, and
-    /// parallaxes / rotates with the camera — you can even fly into it. Same trick the
-    /// clusters use for their member stars, applied to soft additive gas sprites.
-    private func drawNebula(_ context: GraphicsContext, _ landmark: Landmark, at p: CGPoint,
-                            radius r: CGFloat, viewProjection: simd_float4x4, size: CGSize) {
-        let focal = Double(1 / tan(fieldOfView / 2))
-        let halfH = Double(size.height) * 0.5
-        let cap = CGFloat(max(size.width, size.height) * 1.5)
-
-        // Stable per-object seed (String.hashValue is randomised per launch).
-        var rng = SeededGenerator(seed: landmark.id.unicodeScalars.reduce(UInt64(1469598103)) { $0 &* 31 &+ UInt64($1.value) })
-        func rnd(_ a: Double, _ b: Double) -> Double { Double.random(in: a...b, using: &rng) }
-        func gauss() -> Double {
-            let u1 = Double.random(in: 1e-6...1, using: &rng), u2 = Double.random(in: 0...1, using: &rng)
-            return (-2 * log(u1)).squareRoot() * cos(2 * .pi * u2)
-        }
-        func gauss3() -> SIMD3<Float> { SIMD3(Float(gauss()), Float(gauss()), Float(gauss())) }
-        func unitDir() -> SIMD3<Float> {
-            let z = rnd(-1, 1), t = rnd(0, 2 * .pi), rxy = (1 - z * z).squareRoot()
-            return SIMD3(Float(cos(t) * rxy), Float(sin(t) * rxy), Float(z))
-        }
-
-        let center = landmark.positionParsecs
-        let physR = Float(landmark.radiusParsecs)
-        let color = landmark.type.color
-        let teal = Color(red: 0.35, green: 0.7, blue: 0.95)   // OIII-ish cool tint
-        let pink = Color(red: 1.0, green: 0.55, blue: 0.72)   // H-alpha warm knots
-
-        // A randomly oriented anisotropy frame so clouds aren't axis-aligned blobs.
-        let a = simd_normalize(gauss3() + SIMD3(0.0001, 0, 0))
-        let b = simd_normalize(gauss3() - a * simd_dot(a, gauss3()))
-        let (ex, ey, ez) = (a, b, simd_cross(a, b))
-        let aniso = SIMD3<Float>(1.0, Float(rnd(0.55, 0.95)), Float(rnd(0.6, 0.95)))
-        func shape(_ v: SIMD3<Float>) -> SIMD3<Float> {
-            ex * (v.x * aniso.x) + ey * (v.y * aniso.y) + ez * (v.z * aniso.z)
-        }
-
-        // (worldPosition, physicalRadius in pc, colour, baseOpacity)
-        var puffs: [(pos: SIMD3<Float>, rad: Float, color: Color, op: Double)] = []
-        var embeddedStars: [SIMD3<Float>] = []
-
-        switch landmark.type {
-        case .planetaryNebula:
-            // A thin glowing shell (the ejected envelope) with brighter bipolar lobes
-            // along a random axis, around a hot white central star.
-            let axis = simd_normalize(shape(unitDir()))
-            let shellR = physR * 0.62
-            for _ in 0..<70 {
-                let d = shape(unitDir())
-                let pos = center + d * shellR * Float(rnd(0.9, 1.08))
-                let align = abs(simd_dot(simd_normalize(d), axis))
-                puffs.append((pos, physR * Float(rnd(0.1, 0.2)), align > 0.6 ? color : teal, 0.22 + Double(align) * 0.3))
-            }
-            for s in [-1.0, 1.0] {
-                let lobe = center + axis * (shellR * Float(s) * 0.8)
-                for _ in 0..<14 {
-                    puffs.append((lobe + shape(gauss3()) * shellR * 0.35, physR * Float(rnd(0.12, 0.24)), teal, 0.2))
-                }
-            }
-            embeddedStars.append(center)
-
-        case .supernovaRemnant:
-            // A ragged filamentary shell: puffs over a sphere surface with radial
-            // jitter, two-tone (H-alpha + the characteristic violet/teal), faint inside.
-            let shellR = physR * 0.85
-            let n = Int(min(170, max(80, Double(r))))
-            for _ in 0..<n {
-                let pos = center + shape(unitDir()) * shellR * Float(rnd(0.82, 1.06))
-                puffs.append((pos, physR * Float(rnd(0.05, 0.12)), rnd(0, 1) < 0.5 ? color : pink, rnd(0.3, 0.52)))
-            }
-            for _ in 0..<24 {
-                puffs.append((center + shape(gauss3()) * physR * 0.45, physR * Float(rnd(0.25, 0.5)), color, 0.06))
-            }
-
-        default:   // emissionNebula — a billowy, clumpy star-forming cloud
-            let lobeCount = 7
-            var lobes: [(SIMD3<Float>, Float)] = []
-            for _ in 0..<lobeCount { lobes.append((shape(gauss3()) * (physR * 0.45), Float(rnd(0.4, 0.85)))) }
-            let n = Int(min(150, max(60, Double(r) / 1.5)))
-            for _ in 0..<n {
-                let (lc, ls) = lobes[Int(rnd(0, Double(lobeCount) - 1e-3))]
-                let pos = center + lc + shape(gauss3()) * (physR * ls * 0.5)
-                let outer = Double(simd_length(lc) / max(physR, 0.001))
-                let col = rnd(0, 1) < (0.22 + outer * 0.45) ? teal : (rnd(0, 1) < 0.85 ? color : pink)
-                puffs.append((pos, physR * Float(rnd(0.18, 0.42)) * ls, col, rnd(0.07, 0.17)))
-            }
-            for _ in 0..<Int(min(18, max(6, Double(r) / 8))) {   // bright HII knots
-                puffs.append((center + shape(gauss3()) * (physR * 0.4), physR * Float(rnd(0.05, 0.12)), pink, rnd(0.42, 0.62)))
-            }
-            for _ in 0..<8 { embeddedStars.append(center + shape(gauss3()) * (physR * 0.5)) }
-        }
-
-        // Project + cull, then depth-sort far → near so nearer gas layers over far gas.
-        struct Sprite { let p: CGPoint; let r: CGFloat; let color: Color; let op: Double; let depth: Float }
-        var sprites: [Sprite] = []
-        sprites.reserveCapacity(puffs.count)
-        for puff in puffs {
-            guard let (sp, depth) = project(puff.pos, viewProjection, size), depth > 0 else { continue }
-            let rad = min(CGFloat(Double(puff.rad) * halfH * focal / Double(depth)), cap)
-            if rad < 0.6 { continue }
-            let m = rad + 4
-            if sp.x < -m || sp.x > size.width + m || sp.y < -m || sp.y > size.height + m { continue }
-            sprites.append(Sprite(p: sp, r: rad, color: puff.color, op: puff.op, depth: depth))
-        }
-        sprites.sort { $0.depth > $1.depth }
-
-        context.drawLayer { layer in
-            layer.blendMode = .plusLighter
-            for s in sprites {
-                // 3-stop: a brighter, more defined core that falls off to the rim,
-                // so the cloud's structure reads clearly instead of washing out.
-                layer.fill(Path(ellipseIn: CGRect(x: s.p.x - s.r, y: s.p.y - s.r, width: s.r * 2, height: s.r * 2)),
-                           with: .radialGradient(Gradient(colors: [s.color.opacity(s.op), s.color.opacity(s.op * 0.4), .clear]),
-                                                 center: s.p, startRadius: 0, endRadius: s.r))
-            }
-            for w in embeddedStars {
-                guard let (sp, depth) = project(w, viewProjection, size), depth > 0 else { continue }
-                let dr = CGFloat(max(1.0, min(3.5, Double(physR) * 0.05 * halfH * focal / Double(depth))))
-                layer.fill(Path(ellipseIn: CGRect(x: sp.x - dr * 3, y: sp.y - dr * 3, width: dr * 6, height: dr * 6)),
-                           with: .radialGradient(Gradient(colors: [Color.white.opacity(0.5), .clear]),
-                                                 center: sp, startRadius: 0, endRadius: dr * 3))
-                layer.fill(Path(ellipseIn: CGRect(x: sp.x - dr, y: sp.y - dr, width: dr * 2, height: dr * 2)), with: .color(.white))
-            }
-        }
+        .allowsHitTesting(false)
     }
 
     private func overlay(size: CGSize, viewProjection: simd_float4x4, safe: EdgeInsets) -> some View {
@@ -583,10 +260,10 @@ struct GalaxyMapView: View {
         let teal = Color(red: 0.4, green: 0.95, blue: 0.9)
         return VStack(spacing: 2) {
             optionRow("Milky Way", "sparkles", tint: .purple, toggle: true, isOn: showMilkyWay) {
-                showMilkyWay.toggle()
+                showMilkyWay.toggle(); buildScene()
             }
             optionRow("Planet hosts only", "globe.americas.fill", tint: teal, toggle: true, isOn: hostsOnly) {
-                hostsOnly.toggle()
+                hostsOnly.toggle(); buildScene()
             }
             Divider().overlay(.white.opacity(0.12)).padding(.vertical, 2)
             optionRow("Centre on the Sun", "sun.max.fill", tint: Theme.accent, toggle: false, isOn: false) {
@@ -735,6 +412,475 @@ struct GalaxyMapView: View {
         let view = lookAt(eye: cameraEye, center: center, up: SIMD3(0, 1, 0))
         let projection = perspective(fovy: fieldOfView, aspect: aspect, near: 0.05, far: 200000)
         return projection * view
+    }
+
+    /// Camera for the Metal renderer: the same view as `makeViewProjection`, but built
+    /// camera-relative (eye at the origin) so positions fed to the GPU stay small —
+    /// float precision over the galaxy's huge scale range.
+    private func makeCamera(aspect: Float, size: CGSize) -> GalaxyCamera {
+        let dir = lookDirection
+        let cameraEye: SIMD3<Float>
+        let center: SIMD3<Float>
+        if flyMode {
+            cameraEye = eye
+            center = eye - dir
+        } else {
+            cameraEye = target + distance * dir
+            center = target
+        }
+        let view = lookAt(eye: .zero, center: center - cameraEye, up: SIMD3(0, 1, 0))
+        let projection = perspective(fovy: fieldOfView, aspect: aspect, near: 0.05, far: 200000)
+        let focal = 1 / tan(fieldOfView / 2)
+        return GalaxyCamera(viewProj: projection * view, eye: cameraEye,
+                            halfHeightFocal: Float(size.height / 2) * focal, viewSize: size)
+    }
+
+    // MARK: Metal scene
+
+    private func rgba(_ color: Color) -> SIMD4<Float> {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        UIColor(color).getRed(&r, green: &g, blue: &b, alpha: &a)
+        return SIMD4(Float(r), Float(g), Float(b), Float(a))
+    }
+
+    /// Translates the catalogue + procedural art into GPU sprite instances (world
+    /// space, built once per data/art change). Mirrors the Canvas layers: hard-disc
+    /// stars with glow on the brightest, and the Milky Way as crisp + bloom + dust.
+    /// (Landmarks/nebulae/labels are ported in a later milestone.)
+    private func buildScene() {
+        guard !stars.isEmpty else { return }
+        let starCols = starPalette.map(rgba)
+        let backCols = backdropPalette.map(rgba)
+        let dust = rgba(backdropDustColor)
+
+        let hostHIPs = exo.hostHIPs
+
+        var additive: [GalaxySprite] = []          // occludee light (stars, Milky Way) — tests depth
+        additive.reserveCapacity(stars.count + (showMilkyWay ? backdrop.count * 2 : 0) + 4000)
+        var landmarkLight: [GalaxySprite] = []      // landmark/nebula light — never depth-tested
+        var occluder: [GalaxySprite] = []           // invisible depth-only caps (dense, opaque cores)
+        var overlay: [GalaxySprite] = []
+
+        for s in stars {
+            if hostsOnly && !(s.hip.map { hostHIPs.contains($0) } ?? false) { continue }
+            let base = Float(s.baseSize)
+            let c = starCols[s.colorBucket]
+            // Brightness-driven alpha (apparent magnitude). With 100k+ additive sprites
+            // a constant alpha saturates to white wherever the cloud is dense (through
+            // the middle of the local bubble); fading the many faint stars keeps dense
+            // regions a soft glow while the bright stars still read as distinct points.
+            let mag = Float(s.magnitude)
+            let alpha = max(0.07, min(0.85, 0.85 - 0.12 * (mag - 1.0)))
+            additive.append(GalaxySprite(position: s.position, radius: 150 * base,
+                                         color: SIMD4(c.x, c.y, c.z, alpha),
+                                         minPixel: 0.4 * base, maxPixel: 3.0 * base, softness: 0, mode: 1))
+            if s.magnitude < 1.5 {   // soft white glow on the brightest, like the Canvas path
+                additive.append(GalaxySprite(position: s.position, radius: 450 * base,
+                                             color: SIMD4(1, 1, 1, 0.12),
+                                             minPixel: 1.2 * base, maxPixel: 9.0 * base, softness: 1, mode: 1))
+            }
+        }
+
+        // The Sun, at the origin.
+        additive.append(GalaxySprite(position: .zero, radius: 320, color: SIMD4(1.0, 0.6, 0.1, 1),
+                                     minPixel: 3, maxPixel: 7, softness: 0, mode: 1))
+        additive.append(GalaxySprite(position: .zero, radius: 950, color: SIMD4(1.0, 0.6, 0.1, 0.28),
+                                     minPixel: 7, maxPixel: 20, softness: 1, mode: 1))
+
+        // Landmarks (nebulae, clusters, galaxies, black holes) as world-space sprites.
+        appendLandmarkSprites(&landmarkLight, &occluder, &overlay)
+
+        if showMilkyWay {
+            // A soft warm nucleus glow (modest so it doesn't wash out when flown into;
+            // the dense bulge points carry most of the core's brightness).
+            additive.append(GalaxySprite(position: Galactic.centerPosition, radius: 3200,
+                                         color: SIMD4(1.0, 0.78, 0.45, 0.22), minPixel: 0, maxPixel: 1200, softness: 1, mode: 0))
+            additive.append(GalaxySprite(position: Galactic.centerPosition, radius: 1100,
+                                         color: SIMD4(1.0, 0.9, 0.7, 0.35), minPixel: 0, maxPixel: 900, softness: 1, mode: 0))
+        }
+
+        if showMilkyWay {
+            for p in backdrop {
+                let sz = Float(p.size), op = Float(p.baseOpacity)
+                let c = backCols[p.colorBucket]
+                additive.append(GalaxySprite(position: p.position, radius: 800 * sz,
+                                             color: SIMD4(c.x, c.y, c.z, op),
+                                             minPixel: 0.6 * sz, maxPixel: 3.4 * sz, softness: 0.25, mode: 1))
+                additive.append(GalaxySprite(position: p.position, radius: 1920 * sz,    // bloom
+                                             color: SIMD4(c.x, c.y, c.z, op * 0.55),
+                                             minPixel: 1.5 * sz, maxPixel: 8.0 * sz, softness: 1, mode: 1))
+            }
+            for d in backdropDust {
+                let sz = Float(d.size), op = Float(min(0.9, d.baseOpacity * 1.2))
+                overlay.append(GalaxySprite(position: d.position, radius: 900 * sz,
+                                            color: SIMD4(dust.x, dust.y, dust.z, op),
+                                            minPixel: 0.6 * sz, maxPixel: 9.0 * sz, softness: 1, mode: 1))
+            }
+        }
+
+        scene = GalaxyScene(additive: additive, landmarkLight: landmarkLight, occluder: occluder, overlay: overlay)
+        sceneVersion += 1
+    }
+
+    /// Emits world-space sprite instances for every landmark — the GPU equivalent of
+    /// the Canvas `drawLandmark`/`drawNebula`/… generators. Same seeded 3D structure,
+    /// so each object looks identical run to run and parallaxes with the camera.
+    // `additive` here receives landmark/nebula *light* (it is never depth-tested);
+    // `occluder` receives invisible depth-only caps marking dense, opaque cores.
+    private func appendLandmarkSprites(_ additive: inout [GalaxySprite], _ occluder: inout [GalaxySprite], _ overlay: inout [GalaxySprite]) {
+        let pink = SIMD4<Float>(1.0, 0.55, 0.72, 1)
+        let dustC = rgba(backdropDustColor)
+        // Astrophysical emission palette for the overhauled landmark looks.
+        let haAlpha = SIMD4<Float>(1.0, 0.42, 0.55, 1)   // hydrogen-alpha rose
+        let haDeep  = SIMD4<Float>(0.96, 0.26, 0.40, 1)  // deeper Hα knots
+        let oiii    = SIMD4<Float>(0.40, 0.93, 0.80, 1)  // doubly-ionised oxygen teal
+        let reflect = SIMD4<Float>(0.45, 0.62, 1.0, 1)   // blue reflection / young stars
+        let starBW  = SIMD4<Float>(0.72, 0.82, 1.0, 1)   // hot blue-white star
+
+        for lm in Landmarks.all {
+            let center = lm.positionParsecs
+            let physR = Float(lm.radiusParsecs)
+            // Image-baked nebulae (true shape from a real photo) take precedence over
+            // the procedural generator.
+            if let model = NebulaLibrary.model(for: lm.id) {
+                appendBakedNebula(lm, model, center: center, physR: physR, dustC: dustC, &additive, &occluder, &overlay)
+                continue
+            }
+            let color = rgba(lm.type.color)
+            var rng = SeededGenerator(seed: lm.id.unicodeScalars.reduce(UInt64(1469598103)) { $0 &* 31 &+ UInt64($1.value) })
+            func rnd(_ a: Double, _ b: Double) -> Double { Double.random(in: a...b, using: &rng) }
+            func gauss() -> Double {
+                let u1 = Double.random(in: 1e-6...1, using: &rng), u2 = Double.random(in: 0...1, using: &rng)
+                return (-2 * log(u1)).squareRoot() * cos(2 * .pi * u2)
+            }
+            func g3() -> SIMD3<Float> { SIMD3(Float(gauss()), Float(gauss()), Float(gauss())) }
+            func unit() -> SIMD3<Float> {
+                let z = rnd(-1, 1), t = rnd(0, 2 * .pi), rxy = (1 - z * z).squareRoot()
+                return SIMD3(Float(cos(t) * rxy), Float(sin(t) * rxy), Float(z))
+            }
+            let a = simd_normalize(g3() + SIMD3(0.0001, 0, 0))
+            let b = simd_normalize(g3() - a * simd_dot(a, g3()))
+            let (ex, ey, ez) = (a, b, simd_cross(a, b))
+            let aniso = SIMD3<Float>(1, Float(rnd(0.55, 0.95)), Float(rnd(0.6, 0.95)))
+            func shape(_ v: SIMD3<Float>) -> SIMD3<Float> { ex * (v.x * aniso.x) + ey * (v.y * aniso.y) + ez * (v.z * aniso.z) }
+
+            func gas(_ pos: SIMD3<Float>, _ rad: Float, _ c: SIMD4<Float>, _ op: Double, _ soft: Float = 0.55) {
+                additive.append(GalaxySprite(position: pos, radius: rad, color: SIMD4(c.x, c.y, c.z, Float(op)),
+                                             minPixel: 0, maxPixel: 1400, softness: soft, mode: 0))
+            }
+            // An invisible depth-only "cap": writes a landmark's dense, opaque core into
+            // the depth buffer so background stars behind it are occluded — adds no light
+            // (colour 0). Hard disc so most of its area writes depth. Use only where the
+            // object is genuinely opaque (dense nebula lobes, galaxy bulges, globular cores).
+            func cap(_ pos: SIMD3<Float>, _ rad: Float) {
+                occluder.append(GalaxySprite(position: pos, radius: rad, color: SIMD4(0, 0, 0, 0),
+                                             minPixel: 0, maxPixel: 1400, softness: 0, mode: 0))
+            }
+            // A point star with an optional soft glow halo — for cluster members,
+            // embedded young stars, and bright knots in the overhauled looks.
+            func star(_ pos: SIMD3<Float>, _ rad: Float, _ c: SIMD4<Float>, _ op: Double, glow: Bool = false) {
+                if glow {
+                    additive.append(GalaxySprite(position: pos, radius: rad * 4.5, color: SIMD4(c.x, c.y, c.z, Float(op) * 0.22),
+                                                 minPixel: 1, maxPixel: 16, softness: 1, mode: 0))
+                }
+                additive.append(GalaxySprite(position: pos, radius: rad, color: SIMD4(c.x, c.y, c.z, Float(op)),
+                                             minPixel: 0.6, maxPixel: 3.6, softness: 0, mode: 0))
+            }
+            // A stellar colour from an age-appropriate population: old (globular/bulge,
+            // redder) vs young (open cluster/arm, bluer).
+            func popColor(old: Bool) -> SIMD4<Float> {
+                let r = rnd(0, 1)
+                if old {
+                    if r < 0.16 { return starBW } else if r < 0.42 { return SIMD4(1, 1, 1, 1) }
+                    else if r < 0.66 { return SIMD4(1, 0.95, 0.8, 1) } else if r < 0.84 { return SIMD4(1, 0.86, 0.6, 1) }
+                    else if r < 0.94 { return SIMD4(1, 0.72, 0.45, 1) } else { return SIMD4(1, 0.56, 0.42, 1) }
+                }
+                if r < 0.42 { return starBW } else if r < 0.72 { return SIMD4(1, 1, 1, 1) }
+                else if r < 0.9 { return SIMD4(1, 0.95, 0.8, 1) } else { return SIMD4(1, 0.86, 0.6, 1) }
+            }
+            func dustPuff(_ pos: SIMD3<Float>, _ rad: Float, _ op: Double) {
+                overlay.append(GalaxySprite(position: pos, radius: rad, color: SIMD4(dustC.x, dustC.y, dustC.z, Float(op)),
+                                            minPixel: 0, maxPixel: 1400, softness: 1, mode: 0))
+            }
+            func embedded(_ pos: SIMD3<Float>) {
+                additive.append(GalaxySprite(position: pos, radius: physR * 0.16, color: SIMD4(1, 1, 1, 0.5),
+                                             minPixel: 1, maxPixel: 10, softness: 1, mode: 0))
+                additive.append(GalaxySprite(position: pos, radius: physR * 0.04, color: SIMD4(1, 1, 1, 1),
+                                             minPixel: 1, maxPixel: 3.5, softness: 0, mode: 0))
+            }
+            func dustLane(_ dir: SIMD3<Float>, count: Int, span: Float, thickness: Float, op: ClosedRange<Double>) {
+                let u = simd_normalize(shape(dir))
+                for _ in 0..<count {
+                    let t = Float(rnd(-1, 1)) * physR * span
+                    dustPuff(center + u * t + shape(g3()) * (physR * thickness), physR * Float(rnd(0.06, 0.16)), rnd(op.lowerBound, op.upperBound))
+                }
+            }
+
+            switch lm.type {
+            case .planetaryNebula:
+                let axis = simd_normalize(shape(unit()))
+                let shellR = physR * 0.6
+                // Two-colour shell: hot OIII teal inside, cooler Hα rose at the rim.
+                for _ in 0..<120 {
+                    let d = simd_normalize(shape(unit()))
+                    let rr = shellR * Float(rnd(0.9, 1.12))
+                    let edge = Double((rr / shellR - 0.9) / 0.22)            // 0 inner … 1 rim
+                    gas(center + d * rr, physR * Float(rnd(0.08, 0.16)), edge > 0.55 ? haAlpha : oiii, 0.16 + (1 - edge) * 0.24, 0.9)
+                }
+                // Bipolar lobes (many planetaries are bipolar).
+                for s in [-1.0, 1.0] {
+                    let lobe = center + axis * (shellR * Float(s) * 0.85)
+                    for _ in 0..<16 { gas(lobe + shape(g3()) * shellR * 0.34, physR * Float(rnd(0.1, 0.2)), oiii, 0.15, 0.9) }
+                }
+                // Faint extended halo (older ejected shell).
+                for _ in 0..<44 { gas(center + simd_normalize(shape(unit())) * shellR * Float(rnd(1.15, 1.5)), physR * 0.1, haAlpha, 0.05, 1) }
+                // Central hot white-dwarf: a blue-white point with a glow.
+                star(center, physR * 0.05, SIMD4(0.82, 0.9, 1, 1), 1.0, glow: true)
+
+            case .supernovaRemnant:
+                let shellR = physR * 0.85
+                // Filamentary two-colour rim: Hα rose + blue/OIII wisps.
+                for _ in 0..<210 {
+                    let d = simd_normalize(shape(unit()))
+                    gas(center + d * shellR * Float(rnd(0.8, 1.07)), physR * Float(rnd(0.04, 0.1)), rnd(0, 1) < 0.5 ? haAlpha : reflect, rnd(0.28, 0.5), 0.7)
+                }
+                // Brighter knots along the rim.
+                for _ in 0..<28 {
+                    let d = simd_normalize(shape(unit()))
+                    gas(center + d * shellR * Float(rnd(0.85, 1.03)), physR * Float(rnd(0.06, 0.12)), rnd(0, 1) < 0.5 ? oiii : haDeep, 0.5, 0.6)
+                }
+                // Faint interior glow + a neutron star/pulsar for the famous youngsters.
+                for _ in 0..<24 { gas(center + shape(g3()) * physR * 0.45, physR * Float(rnd(0.25, 0.5)), reflect, 0.05) }
+                if lm.id == "m1" || lm.id == "vela" || lm.id == "casa" { star(center, physR * 0.05, SIMD4(0.72, 0.85, 1, 1), 1.0, glow: true) }
+
+            case .emissionNebula:
+                if lm.id == "horsehead" {
+                    for _ in 0..<46 {
+                        let off = (ex * Float(rnd(-1, 1)) + ey * Float(rnd(-1, 1)) + ez * Float(gauss()) * 0.3) * physR
+                        gas(center + off + ex * physR * 0.5, physR * Float(rnd(0.3, 0.55)), rnd(0, 1) < 0.6 ? color : pink, rnd(0.12, 0.24))
+                    }
+                    for _ in 0..<240 {
+                        let h = Float(rnd(-0.9, 0.55)), bulge: Float = (rnd(0, 1) > 0 && h > 0.35) ? 0.42 : 0.16
+                        let pos = center - ex * physR * 0.35 + ey * (h * physR) + ex * (Float(rnd(-1, 1)) * physR * bulge) + ez * Float(gauss()) * physR * 0.12
+                        dustPuff(pos, physR * Float(rnd(0.07, 0.16)), rnd(0.4, 0.8))
+                    }
+                    for _ in 0..<10 {
+                        let h = Float(rnd(-0.6, 0.6))
+                        gas(center - ex * physR * 0.05 + ey * (h * physR), physR * Float(rnd(0.05, 0.1)), pink, rnd(0.3, 0.5))
+                    }
+                } else {
+                    // Layered cloud: warm Hα body, OIII-energised cores, blue reflection.
+                    var lobes: [(SIMD3<Float>, Float)] = []
+                    for _ in 0..<7 { lobes.append((shape(g3()) * (physR * 0.45), Float(rnd(0.4, 0.85)))) }
+                    for _ in 0..<150 {
+                        let (lc, ls) = lobes[Int(rnd(0, 6.999))]
+                        let pos = center + lc + shape(g3()) * (physR * ls * 0.5)
+                        let outer = Double(simd_length(lc) / max(physR, 0.001))
+                        let r = rnd(0, 1)
+                        let c = r < 0.12 ? oiii : (r < 0.12 + outer * 0.4 ? reflect : (r < 0.9 ? haAlpha : haDeep))
+                        gas(pos, physR * Float(rnd(0.18, 0.42)) * ls, c, rnd(0.07, 0.16))
+                    }
+                    for _ in 0..<16 { gas(center + shape(g3()) * (physR * 0.4), physR * Float(rnd(0.05, 0.12)), haDeep, rnd(0.42, 0.6), 0.7) }
+                    // Embedded young cluster lighting the cloud from within.
+                    let cl = center + shape(g3()) * physR * 0.3
+                    for _ in 0..<12 { star(cl + shape(g3()) * physR * 0.18, physR * 0.02, starBW, rnd(0.5, 0.9), glow: rnd(0, 1) < 0.3) }
+                    for _ in 0..<6 { embedded(center + shape(g3()) * (physR * 0.5)) }
+                    // Depth caps over the dense lobes so background stars are occluded.
+                    for (lc, ls) in lobes { cap(center + lc, physR * 0.2 * ls) }
+                    switch lm.id {
+                    case "m20":
+                        for i in 0..<3 { let ang = Double(i) * (.pi / 3) + 0.2; dustLane(SIMD3(Float(cos(ang)), Float(sin(ang)), 0), count: 70, span: 0.95, thickness: 0.05, op: 0.35...0.75) }
+                    case "m16":
+                        dustLane(SIMD3(0.2, 1, 0), count: 80, span: 0.7, thickness: 0.08, op: 0.3...0.65)
+                        dustLane(SIMD3(-0.5, 0.8, 0.2), count: 55, span: 0.55, thickness: 0.07, op: 0.25...0.55)
+                    case "m8", "carina", "rosette":
+                        dustLane(SIMD3(Float(rnd(-1, 1)), 1, 0), count: 60, span: 0.9, thickness: 0.09, op: 0.2...0.45)
+                    default: break
+                    }
+                }
+
+            case .openCluster, .globularCluster:
+                let globular = lm.type == .globularCluster
+                if globular {
+                    gas(center, physR * 0.7, SIMD4(1, 0.92, 0.7, 1), 0.20, 1)     // warm layered core glow
+                    gas(center, physR * 0.34, SIMD4(1, 0.95, 0.82, 1), 0.28, 1)
+                    cap(center, physR * 0.4)                                       // dense core occludes background
+                }
+                let n = globular ? 260 : 70
+                for _ in 0..<n {
+                    let dir = unit()
+                    let frac = globular ? min(1, abs(gauss()) * 0.4) : pow(rnd(0, 1), 1.0 / 3.0)
+                    star(center + dir * (physR * Float(frac)), physR * 0.012, popColor(old: globular), rnd(0.6, 0.95))
+                }
+                // A handful of bright members with glow give the cluster sparkle.
+                for _ in 0..<(globular ? 14 : 8) {
+                    let dir = unit()
+                    let frac = globular ? Float(abs(gauss())) * 0.3 : pow(Float(rnd(0, 1)), 1.0 / 3.0) * 0.9
+                    star(center + dir * (physR * frac), physR * 0.02, globular ? popColor(old: true) : starBW, rnd(0.85, 1.0), glow: true)
+                }
+                // Young clusters keep a breath of blue reflection nebulosity (e.g. Pleiades).
+                if !globular && lm.id == "m45" {
+                    for _ in 0..<30 { gas(center + shape(g3()) * physR * 0.5, physR * Float(rnd(0.2, 0.4)), reflect, 0.06, 1) }
+                }
+
+            case .galaxy:
+                let nrm = simd_normalize(g3() + SIMD3(0.0001, 0, 0))
+                let gx = simd_normalize(g3() - nrm * simd_dot(nrm, g3())), gy = simd_cross(nrm, gx)
+                let warm = SIMD4<Float>(1, 0.86, 0.6, 1)
+                // Bulge: a layered warm core + concentrated old stars.
+                gas(center, physR * 0.5, warm, 0.30, 1)
+                gas(center, physR * 0.24, SIMD4(1, 0.93, 0.78, 1), 0.34, 1)
+                cap(center, physR * 0.3)                                          // dense bulge occludes background
+                for _ in 0..<140 {
+                    let r = abs(Float(gauss())) * physR * 0.16, ang = Float(rnd(0, 2 * .pi))
+                    star(center + cos(ang) * r * gx + sin(ang) * r * gy + Float(gauss()) * physR * 0.05 * nrm, physR * 0.02, popColor(old: true), rnd(0.4, 0.85))
+                }
+                // Central bar.
+                let barAngle = Float(rnd(0, .pi))
+                let bx = cos(barAngle) * gx + sin(barAngle) * gy, bperp = -sin(barAngle) * gx + cos(barAngle) * gy
+                for _ in 0..<120 {
+                    let t = Float(rnd(-1, 1)) * physR * 0.5
+                    star(center + bx * t + bperp * Float(gauss()) * physR * 0.05 + nrm * Float(gauss()) * physR * 0.04, physR * 0.02, warm, rnd(0.3, 0.6))
+                }
+                // Two logarithmic spiral arms: young blue stars, pink HII knots, dust.
+                let pitch = Float(rnd(4.5, 7.0))
+                for arm in 0..<2 {
+                    let phase = Float(arm) * .pi + barAngle
+                    for s in 0..<300 {
+                        let f = Float(s) / 300
+                        let rad = physR * (0.14 + 0.86 * f)
+                        let theta = phase + pitch * Float(log(Double(rad / (physR * 0.14))))
+                        let base = center + cos(theta) * rad * gx + sin(theta) * rad * gy
+                        let perp = cos(theta) * gx + sin(theta) * gy, tang = -sin(theta) * gx + cos(theta) * gy
+                        let pos = base + perp * Float(gauss()) * physR * 0.04 * (0.6 + f) + nrm * Float(gauss()) * physR * 0.025 + tang * Float(rnd(-1, 1)) * physR * 0.02
+                        let r = rnd(0, 1)
+                        let c = r < 0.7 ? starBW : (r < 0.9 ? SIMD4<Float>(1, 1, 1, 1) : warm)
+                        gas(pos, physR * 0.018, c, (0.5 - 0.25 * Double(f)) * rnd(0.5, 1), 0.5)
+                        if rnd(0, 1) < 0.05 {
+                            gas(pos, physR * 0.05, haAlpha, 0.4, 0.8)                          // HII knot
+                            star(pos, physR * 0.02, starBW, 0.85, glow: true)
+                        }
+                        if rnd(0, 1) < 0.35 { dustPuff(base - perp * physR * 0.03 + nrm * Float(gauss()) * physR * 0.02, physR * Float(rnd(0.03, 0.07)), rnd(0.2, 0.45)) }
+                    }
+                }
+                // Faint smooth disc field.
+                for _ in 0..<160 {
+                    let rad = Float(pow(rnd(0, 1), 0.6)) * physR, ang = Float(rnd(0, 2 * .pi))
+                    gas(center + cos(ang) * rad * gx + sin(ang) * rad * gy + nrm * Float(gauss()) * physR * 0.05, physR * 0.02, SIMD4(1, 1, 1, 1), 0.12 * rnd(0.5, 1), 0.5)
+                }
+                // Disc-plane dust (reads as the dark lane when edge-on, e.g. Sombrero).
+                for _ in 0..<70 {
+                    let rad = Float(rnd(0.1, 0.95)) * physR, ang = Float(rnd(0, 2 * .pi))
+                    dustPuff(center + cos(ang) * rad * gx + sin(ang) * rad * gy + nrm * Float(gauss()) * physR * 0.045, physR * Float(rnd(0.04, 0.09)), rnd(0.15, 0.4))
+                }
+
+            case .blackHole:
+                // Proportions follow Schwarzschild geometry: the dark shadow ≈ 2.6 rs and
+                // the disc's inner edge (ISCO) ≈ 3 rs, so the shadow sits just inside a thin
+                // bright photon ring, itself just inside the disc's inner rim. The absolute
+                // size R is stylised — the true horizon is sub-pixel at galaxy scale — but
+                // the shadow/ring/disc ratios are physical. Up close you fly in (easter egg).
+                let isSgr = lm.id == "sgr-a"
+                let dim = isSgr ? 0.85 : 1.0
+                let R = max(8, physR * 10)            // disc outer radius
+                let shadowR = R * 0.26                // event-horizon shadow (2.6 rs)
+                let ringR = R * 0.30                  // photon ring (~1.5 rs lensed to ~2.6)
+                let diskInner = R * 0.34              // disc inner edge (ISCO, 3 rs)
+                let beam = ey                         // Doppler-bright (approaching) limb
+                let hot = SIMD4<Float>(1, 0.98, 0.92, 1), orange2 = SIMD4<Float>(1, 0.5, 0.18, 1)
+                let red2 = SIMD4<Float>(0.85, 0.22, 0.06, 1)
+                // Thin accretion disc: hot-white inner → orange → red outer, strongly
+                // Doppler-beamed on the approaching limb, with a turbulent swirl.
+                for _ in 0..<460 {
+                    let ang = rnd(0, 2 * .pi)
+                    let u = Float(pow(rnd(0, 1), 0.6))
+                    let rr = diskInner + (R - diskInner) * u
+                    let dir = Float(cos(ang)) * ex + Float(sin(ang)) * ey
+                    let pos = center + dir * rr + ez * Float(gauss()) * R * 0.006   // very thin
+                    let t = Double(u)
+                    let col = t < 0.5 ? hot + (orange2 - hot) * Float(t * 2)
+                                      : orange2 + (red2 - orange2) * Float((t - 0.5) * 2)
+                    let tangent = -Float(sin(ang)) * ex + Float(cos(ang)) * ey
+                    let dop = 0.5 + 0.5 * Double(simd_dot(tangent, beam))   // 0 receding → 1 approaching
+                    let beamBoost = 0.25 + 1.6 * dop * dop                  // relativistic limb brightening
+                    gas(pos, R * 0.05, col, (0.5 - 0.28 * t) * beamBoost * dim, 1)
+                }
+                // Bright photon ring hugging the shadow.
+                for _ in 0..<170 {
+                    let ang = rnd(0, 2 * .pi)
+                    let dir = Float(cos(ang)) * ex + Float(sin(ang)) * ey
+                    let tangent = -Float(sin(ang)) * ex + Float(cos(ang)) * ey
+                    let dop = 0.5 + 0.5 * Double(simd_dot(tangent, beam))
+                    gas(center + dir * ringR, R * 0.02, SIMD4(1, 0.97, 0.88, 1), (0.45 + 0.75 * dop) * dim, 0.8)
+                }
+                gas(center, shadowR * 2.6, SIMD4(1, 0.62, 0.32, 1), 0.10 * dim, 1)   // soft hot halo
+                // Relativistic jets for the microquasars (not quiescent Sgr A*).
+                if !isSgr {
+                    for s in [-1.0, 1.0] {
+                        for i in 0..<40 {
+                            let f = Float(i) / 40
+                            let pos = center + ez * Float(s) * R * (0.3 + f * 3.0) + (ex * Float(gauss()) + ey * Float(gauss())) * R * 0.05 * (0.4 + f)
+                            gas(pos, R * 0.05 * (0.5 + f), SIMD4(0.6, 0.8, 1, 1), 0.16 * (1 - Double(f)) * dim, 1)
+                        }
+                    }
+                }
+                // Dark event-horizon shadow: a hard black disc that occludes the disc light
+                // and photon ring behind it (normal-blend overlay subtracts the additive glow).
+                overlay.append(GalaxySprite(position: center, radius: shadowR, color: SIMD4(0, 0, 0, 1),
+                                            minPixel: 2, maxPixel: 1400, softness: 0.08, mode: 0))
+            }
+        }
+    }
+
+    /// Places an image-baked nebula: the normalised particle sheet is oriented to
+    /// face Earth (the origin) at the landmark's real position/scale, with per-particle
+    /// depth synthesised so it reads as the photo head-on and as a volume when orbited.
+    private func appendBakedNebula(_ lm: Landmark, _ model: NebulaParticleSet,
+                                   center: SIMD3<Float>, physR: Float, dustC: SIMD4<Float>,
+                                   _ additive: inout [GalaxySprite], _ occluder: inout [GalaxySprite],
+                                   _ overlay: inout [GalaxySprite]) {
+        let half = physR * 1.4                                  // the photo spans a bit past the catalog radius
+        let n = simd_length(center) > 1e-3 ? simd_normalize(-center) : SIMD3<Float>(0, 0, 1)  // face Earth
+        var right = simd_cross(SIMD3<Float>(0, 1, 0), n)
+        right = simd_length(right) < 1e-4 ? SIMD3<Float>(1, 0, 0) : simd_normalize(right)
+        let up = simd_cross(n, right)
+
+        var rng = SeededGenerator(seed: lm.id.unicodeScalars.reduce(UInt64(977), { $0 &* 31 &+ UInt64($1.value) }))
+        func gauss() -> Float {
+            let u1 = Double.random(in: 1e-6...1, using: &rng), u2 = Double.random(in: 0...1, using: &rng)
+            return Float((-2 * log(u1)).squareRoot() * cos(2 * .pi * u2))
+        }
+        let lumW = SIMD3<Float>(0.2126, 0.7152, 0.0722)
+
+        // Dark structure comes for free from the gas density (the bake places few
+        // particles where the photo is dark), so we deliberately do NOT draw a dark
+        // overlay here — it would punch opaque holes into the additive light.
+        _ = dustC
+        // Invisible depth caps trace the nebula's *bright* shape into the depth buffer so
+        // background stars behind the dense gas are occluded — while genuinely dark gaps
+        // (e.g. Pacman's mouth) get no cap, so stars correctly show through them.
+        // Subsampled (every Nth bright particle) to keep the occluder set small.
+        let capStride = max(1, model.gas.count / 700)
+        for (i, p) in model.gas.enumerated() {
+            let lum = simd_dot(p.color, lumW)
+            let depth = gauss() * half * 0.11 * (0.5 + lum)    // some volume, but tight enough to avoid face-on gaps
+            let world = center + (p.pos.x * half) * right + (p.pos.y * half) * up + depth * n
+            if lum > 0.3 && i % capStride == 0 {
+                occluder.append(GalaxySprite(position: world, radius: half * 0.06, color: SIMD4(0, 0, 0, 0),
+                                             minPixel: 0, maxPixel: 1400, softness: 0, mode: 0))
+            }
+            // A soft bloom underglow fuses neighbours into a smooth cloud; a tighter
+            // sprite adds definition. Opacities kept low so the dense core builds up a
+            // bright-but-coloured centre instead of saturating to flat white.
+            let bloom = min(0.022, Double(lum) * 0.032)
+            additive.append(GalaxySprite(position: world, radius: half * 0.075,
+                                         color: SIMD4(p.color.x, p.color.y, p.color.z, Float(bloom)),
+                                         minPixel: 0, maxPixel: 1400, softness: 1, mode: 0))
+            let op = min(0.085, max(0.016, Double(lum) * 0.10))
+            additive.append(GalaxySprite(position: world, radius: half * 0.04,
+                                         color: SIMD4(p.color.x, p.color.y, p.color.z, Float(op)),
+                                         minPixel: 0, maxPixel: 1400, softness: 0.9, mode: 0))
+        }
     }
 
     // MARK: Free-fly
@@ -892,7 +1038,10 @@ struct GalaxyMapView: View {
                 return
             }
             var bestStar: (distance: CGFloat, star: GalaxyStar)?
-            for star in stars {
+            // Only scan stars in view (octree frustum cull) rather than the whole catalogue.
+            let candidates = octree?.query(planes: frustumPlanes(viewProjection)) ?? Array(stars.indices)
+            for idx in candidates {
+                let star = stars[idx]
                 if hostsOnly && !(star.hip.map { hostHIPs.contains($0) } ?? false) { continue }
                 guard let (point, _) = project(star.position, viewProjection, size) else { continue }
                 let d = hypot(point.x - event.location.x, point.y - event.location.y)
@@ -932,9 +1081,12 @@ struct GalaxyMapView: View {
                 constellation: star.constellation
             ))
         }
-        // Brightest (largest) first, so the level-of-detail cap keeps the prominent ones.
+        // Brightest (largest) first, so the level-of-detail cap keeps the prominent
+        // ones — and so an array index doubles as a brightness rank.
         result.sort { $0.baseSize > $1.baseSize }
         stars = result
+        // Spatial index for frustum culling + picking (built once; positions static).
+        octree = PointOctree(points: result.map { $0.position })
     }
 
     /// Builds the stylized Milky Way at true scale: a full four-arm spiral disc
@@ -1144,9 +1296,6 @@ private let backdropPalette: [Color] = [
 /// carving the dark veins that thread a galaxy's arms.
 private let backdropDustColor = Color(red: 0.05, green: 0.03, blue: 0.02)
 
-// Eight evenly-spaced levels (level i ≈ midpoint of its 1/8 band) — smoother than
-// the old four-step quantisation, which banded the disc haze.
-private let backdropOpacityLevels: [Double] = [0.0625, 0.1875, 0.3125, 0.4375, 0.5625, 0.6875, 0.8125, 0.9375]
 
 /// Faint crosshair marking the centre of the screen — the point you're flying
 /// toward and steering around in free-fly mode.
@@ -1325,6 +1474,18 @@ private func lookAt(eye: SIMD3<Float>, center: SIMD3<Float>, up: SIMD3<Float>) -
         SIMD4(s.z, u.z, -f.z, 0),
         SIMD4(-simd_dot(s, eye), -simd_dot(u, eye), simd_dot(f, eye), 1)
     ))
+}
+
+/// The view-frustum planes (inside ⇔ `dot(n, p) + w ≥ 0`) extracted from a
+/// view-projection matrix via Gribb–Hartmann. We return the four sides plus a
+/// "front" plane (clip.w ≥ 0, matching `project`'s behind-camera cull) and omit
+/// near/far — the Galaxy Map wants distant stars, just not ones off-screen or behind.
+private func frustumPlanes(_ vp: simd_float4x4) -> [SIMD4<Float>] {
+    func row(_ i: Int) -> SIMD4<Float> {
+        SIMD4(vp.columns.0[i], vp.columns.1[i], vp.columns.2[i], vp.columns.3[i])
+    }
+    let r0 = row(0), r1 = row(1), r3 = row(3)
+    return [r3, r3 + r0, r3 - r0, r3 + r1, r3 - r1]   // front, left, right, bottom, top
 }
 
 private func perspective(fovy: Float, aspect: Float, near: Float, far: Float) -> simd_float4x4 {

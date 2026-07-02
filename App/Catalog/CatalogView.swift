@@ -325,7 +325,7 @@ private struct StarDetailView: View {
     @State private var hrPopulation: [HRPoint] = []
 
     private var temperature: Double? { StarFacts.temperatureKelvin(colorIndex: star.colorIndex) }
-    private var summary: String? { StarFacts.summary(for: star.properName) }
+    private var summary: String? { StarFacts.summary(for: star.properName) ?? StarFacts.generatedSummary(for: star) }
     private var spectral: String? { StarFacts.spectralDescription(star.spectralType) }
     private var radiusSolar: Double? { StarFacts.radiusSolar(for: star) }
     private var facts: [String] { StarFacts.relatableFacts(for: star) }
