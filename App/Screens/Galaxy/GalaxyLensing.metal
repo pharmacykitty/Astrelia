@@ -162,16 +162,17 @@ fragment float4 lens_fragment(LensVSOut in [[stage_in]],
         float4 hc = u.viewProj * float4(hp, 1.0);
         float2 hndc = hc.w > 0.001 ? hc.xy / hc.w : float2(0.0);
         float2 dv = ndc - hndc;
-        float stretch = 1.0 + u.spaghetti * 3.0 * exp(-length(dv) * 1.1);
+        float stretch = 1.0 + u.spaghetti * 5.0 * exp(-length(dv) * 1.1);
         ndc = hndc + dv / stretch;
     }
 
     float3 dir = normalize(fwd + right * (ndc.x * u.tanHalfW) + up * (ndc.y * u.tanHalfH));
     // Relativistic aberration, INVERSE map: for each screen direction in the
     // infalling frame, find the rest-frame ray it came from (negative β). The sky
-    // then crowds bright toward the travel axis and the shadow visibly shrinks —
-    // the forward map does the opposite and blacks out the whole frame.
-    if (u.beta > 0.001) dir = bh_aberrate(dir, fwd, -u.beta * 0.7);
+    // crowds bright toward the travel axis and the shadow shrinks. Kept at 0.4×β:
+    // at full strength the shrink outruns the camera's fall and the hole appears
+    // to RECEDE mid-plunge — engulfment must win the tug-of-war.
+    if (u.beta > 0.001) dir = bh_aberrate(dir, fwd, -u.beta * 0.4);
 
     float dAlong = dot(hp, dir);
     float3 cvec = dir * max(dAlong, 0.0) - hp;             // hole → closest approach

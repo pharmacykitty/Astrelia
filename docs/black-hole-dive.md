@@ -7,7 +7,7 @@
 >
 > ✅ **REBUILT & IN THE APP (2026-07-02) — verified on simulator, frame-by-frame.**
 > (The 2026-07-01 build was removed, then rebuilt from this doc the next day as the
-> **easter egg**: free-fly across ~6.5 rs of Sgr A\* and the plunge takes over. No button,
+> **easter egg**: free-fly across ~12 rs of Sgr A\* and the plunge takes over. No button,
 > no card action — you have to fly in.) Current architecture:
 >
 > - **In-map lensing, always on** — `App/Screens/Galaxy/GalaxyLensing.metal` +
@@ -48,8 +48,10 @@
 > - **Beats** (`DiveTimeline.stage`): β 0.19→0.992 with **inverse relativistic aberration**
 >   (screen ray → rest-frame ray, negative β — the forward map blacks the frame out; the
 >   inverse shrinks the shadow while the sky crowds bright around it) + Doppler headlight;
->   equirect `bakeMix` ramps in before heavy aberration; render distance eases to
->   **8.4 → 7.0 rs** (portrait FOV: the shadow is wider than the screen inside ~8 rs);
+>   equirect `bakeMix` ramps in before heavy aberration; the camera genuinely falls,
+>   **11.5 → 7.0 rs** (the shadow grows the whole way; in portrait it spans the screen
+>   inside ~8 rs and inverse aberration holds it at bay), with an accelerating roll,
+>   a widening FOV, and warped disc-swirl time (the outside universe fast-forwards ~5×);
 >   `aperture` collapses the outside universe after the crossing (p = 0.60); `spaghetti`
 >   radial stretch + global redshift inside; white flash → **eject**: the camera rewinds to
 >   an orbit outside, facing the hole, with an epilogue caption ("Nothing that enters ever
@@ -58,7 +60,7 @@
 >   softens aberration + stretch. HUD: speed %c, real-km distance, time-dilation ×, and the
 >   12.8 s countdown; Skip button always present.
 > - **Debug**: `-galaxyBH` opens the map at Sgr A\* (70 pc); `-close` parks at 24 pc
->   (the heaviest march band); `-galaxyBH -dive` spawns free-fly at 9 rs inbound so the
+>   (the heaviest march band); `-galaxyBH -dive` spawns free-fly at 16 rs inbound so the
 >   trigger fires; `-fpsLog` prints frame rate + lens scale every ~2 s; `-dumpDive`
 >   writes the lens output to Documents every 2.5 s (the GPU's ground truth — sim
 >   chrome can wedge mid-dive while the Metal layer plays on). **Always smoke-test new

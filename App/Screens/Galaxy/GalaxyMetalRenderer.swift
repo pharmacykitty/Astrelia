@@ -168,7 +168,11 @@ final class GalaxyMetalRenderer: NSObject {
     private var skyBake: MTLTexture?        // equirect panorama from the hole (bent-ray fallback)
     private var bakedVersion = -1           // scene version the panorama was baked from
     private var blackSky: MTLTexture?       // 1×1 placeholder so the sampler always has a texture
-    private let timeBase = CACurrentMediaTime()
+    // The disc's animation clock. Advanced per frame with a dive-dependent warp
+    // (the infalling observer sees the outside universe fast-forward), accumulated
+    // so the swirl phase never jumps when the rate changes.
+    private var warpedTime: Double = 0
+    private var lastFrameTime = CACurrentMediaTime()
 
     override init() {
         let device = MTLCreateSystemDefaultDevice()
@@ -406,7 +410,17 @@ final class GalaxyMetalRenderer: NSObject {
 
         var side = simd_cross(forward, SIMD3<Float>(0, 1, 0))
         side = simd_length(side) < 1e-4 ? SIMD3(1, 0, 0) : simd_normalize(side)
-        let up = simd_cross(side, forward)
+        var up = simd_cross(side, forward)
+
+        // Accelerating roll around the infall axis — the vertigo of the spiral fall.
+        let roll = DiveTimeline.rollAngle(at: p)
+        if roll != 0 {
+            let c = cos(roll), s = sin(roll)
+            let rolledSide = side * c + simd_cross(forward, side) * s
+            let rolledUp = up * c + simd_cross(forward, up) * s
+            side = simd_normalize(rolledSide)
+            up = simd_normalize(rolledUp)
+        }
 
         // Camera-relative look-at (eye at origin) + perspective, matching makeCamera.
         let f = forward
@@ -416,7 +430,12 @@ final class GalaxyMetalRenderer: NSObject {
             SIMD4(side.z, up.z, -f.z, 0),
             SIMD4(0, 0, 0, 1)
         ))
-        let yScale = 1 / tan(camera.fovY * 0.5)
+        // FOV widens mid-plunge (speed rush). The lens pass builds rays from
+        // tanHalfW/H, so those must track the same field of view.
+        let fov = camera.fovY * DiveTimeline.fovBoost(at: p)
+        camera.tanHalfH = tan(fov * 0.5)
+        camera.tanHalfW = camera.tanHalfH * max(camera.aspect, 1e-4)
+        let yScale = 1 / tan(fov * 0.5)
         let xScale = yScale / max(camera.aspect, 1e-4)
         let zScale: Float = 200000 / (0.05 - 200000)
         let projection = simd_float4x4(columns: (
@@ -442,7 +461,7 @@ final class GalaxyMetalRenderer: NSObject {
                             rx: c.right.x, ry: c.right.y, rz: c.right.z, tanHalfW: c.tanHalfW,
                             ux: c.up.x, uy: c.up.y, uz: c.up.z, tanHalfH: c.tanHalfH,
                             fx: c.forward.x, fy: c.forward.y, fz: c.forward.z,
-                            time: Float(CACurrentMediaTime() - timeBase),
+                            time: Float(warpedTime),
                             hx: hp.x, hy: hp.y, hz: hp.z, rs: c.holeRs,
                             dnx: c.diskNormal.x, dny: c.diskNormal.y, dnz: c.diskNormal.z,
                             diskInner: c.diskInner,
@@ -521,6 +540,15 @@ final class GalaxyMetalRenderer: NSObject {
         guard let queue, let drawable = view.currentDrawable,
               let rpd = view.currentRenderPassDescriptor,
               let cb = queue.makeCommandBuffer() else { return }
+
+        let now = CACurrentMediaTime()
+        let dt = min(0.1, now - lastFrameTime)
+        lastFrameTime = now
+        var warp = 1.0
+        if let start = diveChannel?.start ?? camera.diveStart {
+            warp = DiveTimeline.timeWarp(at: min(1, Date().timeIntervalSince(start) / DiveTimeline.duration))
+        }
+        warpedTime += dt * warp
 
         applyDiveCamera()
         bakeSkyIfNeeded(cb)

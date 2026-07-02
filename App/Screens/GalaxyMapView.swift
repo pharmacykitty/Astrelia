@@ -1008,10 +1008,11 @@ struct GalaxyMapView: View {
         return simd_distance(point, a + ab * t)
     }
 
-    /// Free-flying from outside across ~6.5 rs of Sgr A* commits you to the plunge.
+    /// Free-flying from outside across ~12 rs of Sgr A* commits you to the plunge —
+    /// far enough out that the dive is a genuine fall (the shadow grows the whole way).
     private func checkDiveTrigger(from previous: SIMD3<Float>, to current: SIMD3<Float>) {
         guard diveStart == nil, let hole = Self.sgrA else { return }
-        let triggerR = Float(hole.radiusParsecs) * 6.5
+        let triggerR = Float(hole.radiusParsecs) * 12
         guard simd_distance(previous, hole.positionParsecs) > triggerR,
               segmentDistance(previous, current, to: hole.positionParsecs) <= triggerR else { return }
         startDive()
@@ -1119,7 +1120,7 @@ struct GalaxyMapView: View {
             // `-close` parks in the heaviest band (just outside the influence radius,
             // the march covering the whole frame) for perf verification.
             let close = ProcessInfo.processInfo.arguments.contains("-close")
-            distance = dive ? Float(hole.radiusParsecs) * 9 : (close ? 24 : 70)
+            distance = dive ? Float(hole.radiusParsecs) * 16 : (close ? 24 : 70)
             zoomAnchor = distance
             if dive {
                 enterFlyMode()

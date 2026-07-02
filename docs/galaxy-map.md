@@ -237,7 +237,7 @@ whole frame is ray-marched, so scene+lens render at reduced internal resolution 
 upscales (never via `contentScaleFactor` — that wedges SwiftUI's update graph). Sprite-side
 only a warm beacon remains (`.blackHole` case); microquasars keep the sprite model.
 
-**The easter egg:** free-flying across ~6.5 rs triggers a ~30 s staged plunge — renderer-
+**The easter egg:** free-flying across ~12 rs triggers a ~30 s staged plunge (a true fall, 11.5 → 7 rs) — renderer-
 owned (`DiveChannel` → `applyDiveCamera`, pure functions of wall-clock time), with inverse
 relativistic aberration, the universe collapsing at the crossing, tidal stretch, a white
 flash, and an eject-with-epilogue. Full design + build notes: **`docs/black-hole-dive.md`**.
