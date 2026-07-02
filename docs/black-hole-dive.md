@@ -26,13 +26,18 @@
 >   landmark's catalogued ~0.92 pc, disc 3–10 rs in the galactic plane). Sprite-side,
 >   Sgr A\* keeps only a warm beacon (`GalaxyMapView` `.blackHole` case); microquasars keep
 >   the old sprite model.
-> - **Performance** — near the hole every pixel marches, so scene+lens render into
->   **internal reduced-resolution textures** (`renderScale` 0.3 sim / 0.55 device) and a
->   final `blit_fragment` upscales to the native drawable. Never change the MTKView's
->   `contentScaleFactor` for this (it corrupts SwiftUI's update graph — AttributeGraph
->   cycle — and wedges the window); the internal-texture route has no UIKit side effects.
->   Far from the hole the lens pass is engaged only while its influence region spans ≥ ~a
->   pixel (else the sprite path renders straight to the drawable, zero overhead).
+> - **Performance** — the expensive pixels are the ones whose rays integrate geodesics
+>   (≈ the hole's projected influence disc; the whole frame once the camera is inside
+>   it). `lensScale` budgets that count per frame (~380k px sim / ~1.3M px device) and
+>   renders scene+lens into **internal reduced-resolution textures**, with a final
+>   `blit_fragment` upscale to the native drawable — so frame time stays flat all the
+>   way in (without the budget, the approach band just outside the influence radius
+>   marched nearly the full native frame and froze the app in `currentDrawable`).
+>   Never change the MTKView's `contentScaleFactor` for this (it corrupts SwiftUI's
+>   update graph — AttributeGraph cycle — and wedges the window); the internal-texture
+>   route has no UIKit side effects. Far from the hole the lens pass is engaged only
+>   while its influence region spans ≥ ~a pixel (else the sprite path renders straight
+>   to the drawable, zero overhead).
 > - **The dive is renderer-owned** — `DiveChannel` (imperative box) hands the fly-loop's
 >   trigger to the renderer; `applyDiveCamera()` recomputes pose + `DiveStage` uniforms
 >   per display-link frame as **pure functions of wall-clock time** (`DiveTimeline` in
@@ -52,10 +57,11 @@
 >   photon ring white-hot while the stacked boosts roll off filmically. Reduce Motion
 >   softens aberration + stretch. HUD: speed %c, real-km distance, time-dilation ×, and the
 >   12.8 s countdown; Skip button always present.
-> - **Debug**: `-galaxyBH` opens the map at Sgr A\* (70 pc); `-galaxyBH -dive` spawns
->   free-fly at 9 rs inbound so the trigger fires; add `-dumpDive` to write the lens
->   output to Documents every 2.5 s (the GPU's ground truth — sim chrome can wedge
->   mid-dive while the Metal layer plays on).
+> - **Debug**: `-galaxyBH` opens the map at Sgr A\* (70 pc); `-close` parks at 24 pc
+>   (the heaviest march band); `-galaxyBH -dive` spawns free-fly at 9 rs inbound so the
+>   trigger fires; `-fpsLog` prints frame rate + lens scale every ~2 s; `-dumpDive`
+>   writes the lens output to Documents every 2.5 s (the GPU's ground truth — sim
+>   chrome can wedge mid-dive while the Metal layer plays on).
 >
 > **Not yet done:** on-device verification (trigger, perf, HUD liveness), Kerr spin /
 > frame-dragging, bake longitude-seam wrap, and the SwiftUI AttributeGraph wedge under

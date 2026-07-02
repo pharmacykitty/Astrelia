@@ -85,11 +85,6 @@ struct GalaxyCamera {
     var tanHalfW: Float = 1
     var tanHalfH: Float = 1
     var dive = DiveStage()
-    /// Drawable-resolution multiplier (≤ 1). Dropped while the camera is inside the
-    /// geodesic-march zone: every pixel is then ray-marched, which the simulator's
-    /// software Metal cannot survive at native scale (and even device GPUs
-    /// appreciate the discount mid-dive, per docs/black-hole-dive.md).
-    var renderScale: CGFloat = 1
 
     // Dive playback (the easter egg): while `diveStart` is set the RENDERER owns
     // the camera — pose and stage are pure functions of wall-clock time, computed
@@ -358,6 +353,10 @@ final class GalaxyMetalRenderer: NSObject {
     // dive's real rendered frames can be inspected headlessly (the simulator's
     // SwiftUI chrome can wedge mid-dive, but these are the GPU's ground truth).
     private let dumpFrames = ProcessInfo.processInfo.arguments.contains("-dumpDive")
+    // Debug (`-fpsLog`): print frame rate + lens scale every ~2 s.
+    private let fpsLog = ProcessInfo.processInfo.arguments.contains("-fpsLog")
+    private var frameCount = 0
+    private var lastFPSLog = CACurrentMediaTime()
     private var lastDump: CFTimeInterval = 0
 
     private nonisolated static func writeDump(_ tex: MTLTexture, tag: String) {
@@ -488,6 +487,36 @@ final class GalaxyMetalRenderer: NSObject {
         bakedVersion = loadedVersion
     }
 
+    /// Internal lens resolution from a march-cost budget. The expensive pixels are
+    /// the ones whose rays integrate geodesics — roughly the hole's projected
+    /// influence disc (the whole frame once the camera is inside it). Scaling the
+    /// internal resolution so that count stays bounded keeps frame time flat all the
+    /// way in; without this, the approach band just outside the influence radius
+    /// marches nearly the full native frame and parks the main thread in
+    /// `currentDrawable` — the "freeze as you get close". Floored to 0.1 steps so
+    /// the offscreen textures only reallocate at discrete approach distances.
+    private func lensScale(drawableSize: CGSize) -> CGFloat {
+        let area = drawableSize.width * drawableSize.height
+        guard area > 1, camera.holeRs > 0 else { return 1 }
+        #if targetEnvironment(simulator)
+        let budget: CGFloat = 380_000     // the sim's Metal is far slower than any device GPU
+        #else
+        let budget: CGFloat = 1_300_000
+        #endif
+        let toHole = camera.holePos - camera.eye
+        let dist = simd_length(toHole)
+        let influence = camera.holeRs * 20
+        var marchArea = area
+        if dist > influence, camera.viewSize.height > 1 {
+            let nativePerPoint = drawableSize.height / camera.viewSize.height
+            let rPx = CGFloat(influence / max(dist, 1) * camera.halfHeightFocal) * nativePerPoint
+            marchArea = min(area, .pi * rPx * rPx)
+        }
+        guard marchArea > budget else { return 1 }
+        let s = sqrt(budget / marchArea)
+        return max(0.3, (s * 10).rounded(.down) / 10)
+    }
+
     private func render(in view: MTKView) {
         guard let queue, let drawable = view.currentDrawable,
               let rpd = view.currentRenderPassDescriptor,
@@ -495,14 +524,24 @@ final class GalaxyMetalRenderer: NSObject {
 
         applyDiveCamera()
         bakeSkyIfNeeded(cb)
-        // Near the hole the whole frame is ray-marched, so scene + lens render into
-        // internal textures at a reduced pixel size and a final blit upscales to the
+        // Near the hole many/all pixels are ray-marched, so scene + lens render into
+        // internal textures at a budgeted pixel size and a final blit upscales to the
         // native drawable. All internal: the MTKView/layer never change scale (doing
         // that mid-flight corrupts SwiftUI's update graph and wedges the window).
-        let scale = CGFloat(max(0.05, min(1, camera.renderScale)))
+        let scale = lensScale(drawableSize: view.drawableSize)
         let reduced = scale < 0.999
         let lensSize = CGSize(width: (view.drawableSize.width * scale).rounded(.down),
                               height: (view.drawableSize.height * scale).rounded(.down))
+        if fpsLog {
+            frameCount += 1
+            let t = CACurrentMediaTime()
+            if t - lastFPSLog > 2 {
+                let dist = simd_distance(camera.eye, camera.holePos)
+                print("METAL fps=\(String(format: "%.1f", Double(frameCount) / (t - lastFPSLog))) scale=\(scale) distPc=\(String(format: "%.1f", dist)) holeRs=\(camera.holeRs)")
+                frameCount = 0
+                lastFPSLog = t
+            }
+        }
         if camera.holeRs > 0, let lensPipeline, let blitPipeline,
            ensureOffscreen(lensSize, needsLensOut: reduced),
            let sceneColor, let sceneDepth {

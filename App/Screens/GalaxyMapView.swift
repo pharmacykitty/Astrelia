@@ -464,16 +464,6 @@ struct GalaxyMapView: View {
             let dist = simd_length(toHole)
             let influence = rs * 20
             let projectedPx = influence / max(dist, 1) * camera.halfHeightFocal
-            if dist < influence {
-                // Inside the march zone every pixel integrates a geodesic — drop
-                // the drawable resolution (hard on the simulator's software Metal,
-                // gently on device) and let the warp hide the softness.
-                #if targetEnvironment(simulator)
-                camera.renderScale = 0.30
-                #else
-                camera.renderScale = 0.55
-                #endif
-            }
             if dist < influence || (simd_dot(toHole, f) > 0 && projectedPx > 0.75) {
                 var side = simd_cross(f, SIMD3<Float>(0, 1, 0))
                 side = simd_length(side) < 1e-4 ? SIMD3(1, 0, 0) : simd_normalize(side)
@@ -1126,7 +1116,10 @@ struct GalaxyMapView: View {
             target = hole.positionParsecs
             yaw = atan2(fromHole.x, fromHole.z)
             pitch = asin(max(-1, min(1, fromHole.y)))
-            distance = dive ? Float(hole.radiusParsecs) * 9 : 70
+            // `-close` parks in the heaviest band (just outside the influence radius,
+            // the march covering the whole frame) for perf verification.
+            let close = ProcessInfo.processInfo.arguments.contains("-close")
+            distance = dive ? Float(hole.radiusParsecs) * 9 : (close ? 24 : 70)
             zoomAnchor = distance
             if dive {
                 enterFlyMode()
