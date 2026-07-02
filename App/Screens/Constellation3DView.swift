@@ -33,6 +33,7 @@ struct Constellation3DView: View {
     @State private var spinning = false
     @State private var spinTask: Task<Void, Never>?
     @State private var resetTask: Task<Void, Never>?
+    @State private var introTask: Task<Void, Never>?
 
     private let fieldOfView: Float = 0.8   // radians (~46°)
 
@@ -64,7 +65,7 @@ struct Constellation3DView: View {
         .ignoresSafeArea()
         .toolbar(.hidden, for: .navigationBar)
         .task { build() }
-        .onDisappear { spinTask?.cancel(); resetTask?.cancel() }
+        .onDisappear { spinTask?.cancel(); resetTask?.cancel(); introTask?.cancel() }
     }
 
     // MARK: Overlay chrome
@@ -120,6 +121,12 @@ struct Constellation3DView: View {
         return proj * view
     }
 
+    /// Light-years for a star label: one decimal for the nearest, whole grouped
+    /// numbers beyond (e.g. "8.6 ly", "548 ly", "1,344 ly").
+    private func formatLightYears(_ ly: Double) -> String {
+        ly < 10 ? String(format: "%.1f ly", ly) : "\(Int(ly.rounded()).formatted()) ly"
+    }
+
     private func project(_ p: SIMD3<Float>, _ vp: simd_float4x4, _ size: CGSize) -> (CGPoint, Float)? {
         let clip = vp * SIMD4<Float>(p, 1)
         guard clip.w > 0.0001 else { return nil }
@@ -131,6 +138,23 @@ struct Constellation3DView: View {
 
     private func draw(model: Constellation3DModel, in context: GraphicsContext,
                       size: CGSize, viewProjection vp: simd_float4x4) {
+        // Sightlines from Earth out to each figure star. They collapse to nothing at the
+        // exact front view (you're looking straight down them, so the stars line up) and
+        // fan out into a starburst the moment you rotate away — making "these stars only
+        // line up from Earth" literal. Faded by how far you've turned from the front.
+        let align = simd_dot(eyeDirection(yaw, pitch), eyeDirection(frontYaw, frontPitch))
+        let offFront = max(0, 1 - Double(align))
+        let rayOpacity = min(0.16, offFront * 0.42)
+        if rayOpacity > 0.012, let (earth, ed) = project(.zero, vp, size), ed > 0 {
+            var rays = Path()
+            for s in model.figureStars {
+                guard let (sp, sd) = project(s, vp, size), sd > 0 else { continue }
+                rays.move(to: earth); rays.addLine(to: sp)
+            }
+            context.stroke(rays, with: .color(Color(red: 0.45, green: 0.72, blue: 1).opacity(rayOpacity)),
+                           style: StrokeStyle(lineWidth: 0.8))
+        }
+
         // Figure lines, behind the stars: glow then a crisp core.
         var linePath = Path()
         for seg in model.segments {
@@ -160,14 +184,19 @@ struct Constellation3DView: View {
         }
         context.fill(glow, with: .color(.white.opacity(0.10)))
 
-        // Brightest named stars get a label, de-cluttered by simple rect testing.
+        // Brightest named stars get a two-line label — name plus its real distance, so
+        // the depth the rotation reveals has hard numbers attached (Betelgeuse ~548 ly,
+        // Rigel ~860 ly…). De-cluttered by simple rect testing.
         var labelRects: [CGRect] = []
         for star in model.stars where star.label != nil {
             guard let (p, _) = project(star.position, vp, size) else { continue }
             let text = Text(star.label!).font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.white.opacity(0.78))
+                .foregroundStyle(.white.opacity(0.82))
+                + Text("\n" + formatLightYears(star.distanceLightYears))
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(Theme.accent.opacity(0.75))
             let resolved = context.resolve(text)
-            let m = resolved.measure(in: CGSize(width: 140, height: 30))
+            let m = resolved.measure(in: CGSize(width: 150, height: 40))
             let rect = CGRect(x: p.x + 7, y: p.y - 7 - m.height, width: m.width, height: m.height)
             guard rect.minX > 2, rect.maxX < size.width - 2, rect.minY > 2, rect.maxY < size.height - 2,
                   !labelRects.contains(where: { $0.intersects(rect) }) else { continue }
@@ -201,10 +230,37 @@ struct Constellation3DView: View {
         let toEye = simd_normalize(-built.centroid)   // centroid → Earth direction
         frontPitch = asin(max(-0.9995, min(0.9995, toEye.z)))
         frontYaw = atan2(toEye.y, toEye.x)
-        frontDistance = max(built.radius / tan(fieldOfView * 0.42), built.radius * 1.15)
+        // A gentle distance (~4× the figure's radius) keeps the front view close to the
+        // near-orthographic shape you'd recognise from Earth, with margin for labels;
+        // the depth still reveals itself the moment you start to rotate.
+        frontDistance = max(built.radius / tan(fieldOfView * 0.31), built.radius * 1.2)
         yaw = frontYaw; pitch = frontPitch; distance = frontDistance
         zoomAnchor = frontDistance
         model = built
+        playDepthBloom()
+    }
+
+    /// A one-shot "here's the depth" gesture on open: gently arcs the camera off the
+    /// front view and eases it back, so the flat pattern visibly swells into 3D and
+    /// settles — a hint that there's something to drag, before the user touches it.
+    private func playDepthBloom() {
+        introTask?.cancel()
+        introTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(500))   // let the front view register first
+            guard !Task.isCancelled else { return }
+            let start = Date()
+            let duration = 2.7
+            let yawAmp: Float = 0.5, pitchAmp: Float = 0.17
+            while !Task.isCancelled {
+                let raw = min(1, Date().timeIntervalSince(start) / duration)
+                let s = Float(sin(raw * .pi))            // 0 → 1 → 0, out and back
+                yaw = frontYaw + yawAmp * s
+                pitch = max(-1.5699, min(1.5699, frontPitch + pitchAmp * s))
+                if raw >= 1 { break }
+                try? await Task.sleep(for: .milliseconds(16))
+            }
+            if !Task.isCancelled { yaw = frontYaw; pitch = frontPitch }
+        }
     }
 
     // MARK: Interaction
@@ -212,7 +268,7 @@ struct Constellation3DView: View {
     private var dragGesture: some Gesture {
         DragGesture(minimumDistance: 1)
             .onChanged { value in
-                stopSpin(); resetTask?.cancel()
+                stopSpin(); resetTask?.cancel(); introTask?.cancel()
                 let sy = dragStartYaw ?? yaw
                 let sp = dragStartPitch ?? pitch
                 if dragStartYaw == nil { dragStartYaw = sy; dragStartPitch = sp }
@@ -225,7 +281,7 @@ struct Constellation3DView: View {
     private var zoomGesture: some Gesture {
         MagnificationGesture()
             .onChanged { value in
-                resetTask?.cancel()
+                resetTask?.cancel(); introTask?.cancel()
                 let r = model?.radius ?? 1
                 distance = min(r * 14, max(r * 0.4, zoomAnchor / Float(value)))
             }
@@ -239,6 +295,7 @@ struct Constellation3DView: View {
     private func startSpin() {
         spinning = true
         resetTask?.cancel()
+        introTask?.cancel()
         spinTask?.cancel()
         spinTask = Task { @MainActor in
             var last = Date()
@@ -261,6 +318,7 @@ struct Constellation3DView: View {
     /// Eases the camera back to the Earth-on front view.
     private func resetToFront() {
         stopSpin()
+        introTask?.cancel()
         resetTask?.cancel()
         let startYaw = yaw, startPitch = pitch, startDistance = distance
         var dYaw = frontYaw - startYaw
@@ -293,6 +351,7 @@ struct Constellation3DStar: Identifiable {
     let magnitude: Double
     let color: Color
     let label: String?
+    let distanceLightYears: Double
 }
 
 /// Resolves a sky figure into real 3D geometry: the catalog stars in its patch of
@@ -301,6 +360,9 @@ struct Constellation3DStar: Identifiable {
 struct Constellation3DModel {
     let stars: [Constellation3DStar]
     let segments: [(SIMD3<Float>, SIMD3<Float>)]
+    /// The unique stars the figure lines actually connect — the targets for the
+    /// Earth sightlines (a far smaller, cleaner set than every field star).
+    let figureStars: [SIMD3<Float>]
     let centroid: SIMD3<Float>
     let radius: Float
 
@@ -319,7 +381,8 @@ struct Constellation3DModel {
             candidates.append(Cand(pos: pos, unit: simd_normalize(pos), mag: star.apparentMagnitude, star: star))
         }
         guard !candidates.isEmpty else {
-            return Constellation3DModel(stars: [], segments: [], centroid: SIMD3(0, 0, 1), radius: 1)
+            return Constellation3DModel(stars: [], segments: [], figureStars: [],
+                                        centroid: SIMD3(0, 0, 1), radius: 1)
         }
 
         // Snap every figure vertex onto the nearest candidate star (by angle), so the
@@ -338,10 +401,14 @@ struct Constellation3DModel {
         }
 
         var segments: [(SIMD3<Float>, SIMD3<Float>)] = []
+        var figureStars: [SIMD3<Float>] = []
+        func note(_ p: SIMD3<Float>) {
+            if !figureStars.contains(where: { simd_distance($0, p) < 0.01 }) { figureStars.append(p) }
+        }
         for line in figure.polylines where line.count >= 2 {
-            var prev = resolve(line[0])
+            var prev = resolve(line[0]); note(prev)
             for i in 1..<line.count {
-                let cur = resolve(line[i])
+                let cur = resolve(line[i]); note(cur)
                 segments.append((prev, cur))
                 prev = cur
             }
@@ -357,7 +424,8 @@ struct Constellation3DModel {
                 position: c.pos,
                 magnitude: c.mag,
                 color: StarColor.from(colorIndex: c.star.colorIndex),
-                label: c.mag <= 3.0 ? (c.star.properName ?? c.star.bayerFlamsteed) : nil)
+                label: c.mag <= 3.0 ? (c.star.properName ?? c.star.bayerFlamsteed) : nil,
+                distanceLightYears: Double(simd_length(c.pos)) * Astrophysics.lightYearsPerParsec)
         }
 
         // Centre and frame on the figure itself (its line vertices) so rotation orbits
@@ -370,7 +438,7 @@ struct Constellation3DModel {
         var radius: Float = 1
         for p in basis { radius = max(radius, simd_length(p - centroid)) }
 
-        return Constellation3DModel(stars: stars, segments: segments,
+        return Constellation3DModel(stars: stars, segments: segments, figureStars: figureStars,
                                     centroid: centroid, radius: radius)
     }
 
