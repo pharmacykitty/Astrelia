@@ -1,0 +1,797 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Astrolabe — App Icon & Name Concepts</title>
+<style>
+  :root{
+    --periwinkle:#8FB8FF;
+    --peri-soft:#BCD4FF;
+    --gold:#F5CE7A;
+    --violet:#A98CF5;
+    --cyan:#5FDCF0;
+    --ink:#E9EEFF;
+    --muted:#9aa3c4;
+    --line:rgba(143,184,255,.16);
+    --card:rgba(143,184,255,.04);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",sans-serif;
+    color:var(--ink);
+    background:
+      radial-gradient(1200px 800px at 50% -10%, #161a3e 0%, rgba(8,9,26,0) 60%),
+      radial-gradient(900px 900px at 90% 20%, #1a1136 0%, rgba(8,9,26,0) 55%),
+      linear-gradient(180deg,#08091a 0%, #04030c 100%);
+    background-attachment:fixed;
+    min-height:100vh;
+    -webkit-font-smoothing:antialiased;
+  }
+  /* faint starfield */
+  body::before{
+    content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
+    background-image:
+      radial-gradient(1px 1px at 20% 30%, rgba(255,255,255,.7), transparent),
+      radial-gradient(1px 1px at 70% 60%, rgba(255,255,255,.5), transparent),
+      radial-gradient(1.4px 1.4px at 40% 80%, rgba(255,255,255,.6), transparent),
+      radial-gradient(1px 1px at 85% 15%, rgba(255,255,255,.45), transparent),
+      radial-gradient(1px 1px at 12% 70%, rgba(255,255,255,.4), transparent),
+      radial-gradient(1.2px 1.2px at 60% 25%, rgba(255,255,255,.5), transparent),
+      radial-gradient(1px 1px at 32% 50%, rgba(255,255,255,.35), transparent);
+    opacity:.5;
+  }
+  .wrap{position:relative;z-index:1;max-width:1180px;margin:0 auto;padding:64px 28px 120px}
+  .serif{font-family:"New York","Georgia",ui-serif,serif}
+
+  header.hero{text-align:center;margin-bottom:70px}
+  .eyebrow{letter-spacing:.32em;text-transform:uppercase;font-size:12px;color:var(--periwinkle);opacity:.8;margin-bottom:18px}
+  h1{font-size:clamp(40px,7vw,76px);margin:0 0 14px;font-weight:700;letter-spacing:-.02em;
+     background:linear-gradient(180deg,#fff, #b9c4ee);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .tagline{font-size:19px;color:var(--muted);max-width:640px;margin:0 auto;line-height:1.55}
+  .lead{max-width:720px;margin:28px auto 0;color:#c3cbe8;font-size:16px;line-height:1.7}
+
+  h2.section{font-size:13px;letter-spacing:.28em;text-transform:uppercase;color:var(--periwinkle);
+    margin:80px 0 8px;text-align:center;opacity:.85}
+  .section-title{font-size:clamp(28px,4vw,40px);text-align:center;margin:0 0 10px;font-weight:700;letter-spacing:-.01em}
+  .section-sub{text-align:center;color:var(--muted);max-width:680px;margin:0 auto 44px;line-height:1.6}
+
+  /* ---- naming ---- */
+  .names{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:16px;margin-bottom:24px}
+  .name-card{border:1px solid var(--line);background:var(--card);border-radius:18px;padding:22px 22px 20px;
+    backdrop-filter:blur(8px);transition:transform .2s ease, border-color .2s}
+  .name-card:hover{transform:translateY(-3px);border-color:rgba(143,184,255,.4)}
+  .name-card.pick{border-color:rgba(245,206,122,.5);box-shadow:0 0 40px rgba(245,206,122,.12)}
+  .name-card h3{margin:0 0 2px;font-size:25px;font-weight:600}
+  .name-card .pron{font-size:13px;color:var(--muted);margin-bottom:12px}
+  .name-card p{margin:0;font-size:14px;line-height:1.6;color:#c3cbe8}
+  .tag{display:inline-block;font-size:11px;letter-spacing:.12em;text-transform:uppercase;
+    padding:4px 10px;border-radius:999px;margin-bottom:12px}
+  .tag.keep{background:rgba(245,206,122,.14);color:var(--gold);border:1px solid rgba(245,206,122,.4)}
+  .tag.alt{background:rgba(143,184,255,.1);color:var(--periwinkle);border:1px solid var(--line)}
+  .tag.bold{background:rgba(169,140,245,.12);color:var(--violet);border:1px solid rgba(169,140,245,.35)}
+
+  /* ---- icon grid ---- */
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:26px}
+  .icard{border:1px solid var(--line);background:var(--card);border-radius:24px;padding:24px;
+    backdrop-filter:blur(10px);transition:transform .25s ease,border-color .25s, box-shadow .25s}
+  .icard:hover{transform:translateY(-4px);border-color:rgba(143,184,255,.42);box-shadow:0 24px 60px rgba(0,0,0,.5)}
+  .icon-hero{display:flex;justify-content:center;margin-bottom:18px}
+  .icon-hero svg{width:188px;height:188px;border-radius:42px;
+    box-shadow:0 18px 50px rgba(0,0,0,.55), inset 0 0 0 1px rgba(255,255,255,.05)}
+  .chips{display:flex;align-items:center;gap:12px;justify-content:center;margin-bottom:20px}
+  .chips .lbl{font-size:11px;color:var(--muted);margin-right:2px}
+  .chips svg{border-radius:22%}
+  .num{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:8px;
+    background:rgba(143,184,255,.12);border:1px solid var(--line);color:var(--periwinkle);font-size:13px;font-weight:700;margin-right:10px}
+  .icard h3{display:flex;align-items:center;margin:0 0 4px;font-size:21px;font-weight:650}
+  .role{font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--periwinkle);opacity:.75;margin:0 0 14px 36px}
+  .meta{margin:0 0 14px}
+  .meta dt{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin-bottom:3px}
+  .meta dd{margin:0 0 12px;font-size:14px;line-height:1.6;color:#cfd6f0}
+  .palette{display:flex;gap:7px;margin-top:4px}
+  .sw{width:18px;height:18px;border-radius:6px;border:1px solid rgba(255,255,255,.14)}
+
+  .footer{margin-top:90px;text-align:center;color:var(--muted);font-size:14px;line-height:1.7}
+  .footer .serif{color:#d7ddf5;font-size:18px}
+  hr.div{border:none;height:1px;background:linear-gradient(90deg,transparent,var(--line),transparent);margin:60px 0}
+</style>
+</head>
+<body>
+
+<!-- ============ SHARED SVG DEFS ============ -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<defs>
+  <clipPath id="squircle"><rect x="0" y="0" width="1024" height="1024" rx="224" ry="224"/></clipPath>
+
+  <!-- backgrounds -->
+  <radialGradient id="bgDeep" cx="50%" cy="38%" r="75%">
+    <stop offset="0%" stop-color="#12183a"/>
+    <stop offset="55%" stop-color="#0a0c22"/>
+    <stop offset="100%" stop-color="#03030c"/>
+  </radialGradient>
+  <radialGradient id="bgViolet" cx="50%" cy="40%" r="80%">
+    <stop offset="0%" stop-color="#241551"/>
+    <stop offset="60%" stop-color="#120a30"/>
+    <stop offset="100%" stop-color="#05030f"/>
+  </radialGradient>
+  <radialGradient id="bgGold" cx="50%" cy="42%" r="80%">
+    <stop offset="0%" stop-color="#1c1a33"/>
+    <stop offset="55%" stop-color="#0c0b1f"/>
+    <stop offset="100%" stop-color="#040309"/>
+  </radialGradient>
+  <radialGradient id="bgCyan" cx="50%" cy="40%" r="80%">
+    <stop offset="0%" stop-color="#0c2240"/>
+    <stop offset="58%" stop-color="#061425"/>
+    <stop offset="100%" stop-color="#02060f"/>
+  </radialGradient>
+
+  <!-- strokes / fills -->
+  <linearGradient id="peri" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0%" stop-color="#DCE7FF"/><stop offset="100%" stop-color="#7FA8FF"/>
+  </linearGradient>
+  <linearGradient id="periH" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0%" stop-color="#BCD4FF"/><stop offset="100%" stop-color="#6E92F5"/>
+  </linearGradient>
+  <linearGradient id="brass" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0%" stop-color="#FCE6AE"/><stop offset="100%" stop-color="#D6A24E"/>
+  </linearGradient>
+  <linearGradient id="goldG" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0%" stop-color="#FFE9B0"/><stop offset="100%" stop-color="#E9B257"/>
+  </linearGradient>
+  <linearGradient id="violetG" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0%" stop-color="#D9C6FF"/><stop offset="100%" stop-color="#8A5CF0"/>
+  </linearGradient>
+  <linearGradient id="cyanG" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0%" stop-color="#BFF4FF"/><stop offset="100%" stop-color="#3FC8E6"/>
+  </linearGradient>
+  <radialGradient id="core" cx="50%" cy="50%" r="50%">
+    <stop offset="0%" stop-color="#ffffff"/><stop offset="55%" stop-color="#EaF1FF"/><stop offset="100%" stop-color="#9FBEFF"/>
+  </radialGradient>
+  <radialGradient id="coreGold" cx="50%" cy="50%" r="50%">
+    <stop offset="0%" stop-color="#fffaf0"/><stop offset="60%" stop-color="#FFE6A8"/><stop offset="100%" stop-color="#F0B85C"/>
+  </radialGradient>
+  <radialGradient id="sphereFill" cx="42%" cy="36%" r="70%">
+    <stop offset="0%" stop-color="#26315f"/><stop offset="60%" stop-color="#101635"/><stop offset="100%" stop-color="#070a1c"/>
+  </radialGradient>
+
+  <!-- glows -->
+  <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+    <feGaussianBlur stdDeviation="6" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+  </filter>
+  <filter id="glowMed" x="-80%" y="-80%" width="260%" height="260%">
+    <feGaussianBlur stdDeviation="12" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+  </filter>
+  <filter id="glowBig" x="-120%" y="-120%" width="340%" height="340%">
+    <feGaussianBlur stdDeviation="22" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+  </filter>
+
+  <!-- reusable diffraction star (centred at 0,0) -->
+  <g id="dstar">
+    <g filter="url(#glowBig)">
+      <polygon points="0,-300 16,0 0,300 -16,0" fill="url(#core)"/>
+      <polygon points="-300,0 0,-16 300,0 0,16" fill="url(#core)"/>
+      <polygon points="-150,-150 0,-9 150,150 9,0" fill="url(#core)" opacity=".55"/>
+      <polygon points="150,-150 9,0 -150,150 0,9" fill="url(#core)" opacity=".55"/>
+      <circle r="30" fill="#fff"/>
+    </g>
+  </g>
+  <g id="dstarGold">
+    <g filter="url(#glowBig)">
+      <polygon points="0,-300 16,0 0,300 -16,0" fill="url(#coreGold)"/>
+      <polygon points="-300,0 0,-16 300,0 0,16" fill="url(#coreGold)"/>
+      <polygon points="-150,-150 0,-9 150,150 9,0" fill="url(#coreGold)" opacity=".5"/>
+      <polygon points="150,-150 9,0 -150,150 0,9" fill="url(#coreGold)" opacity=".5"/>
+      <circle r="30" fill="#fffaf0"/>
+    </g>
+  </g>
+
+  <!-- ===================== ICON SYMBOLS ===================== -->
+
+  <!-- 1. ASTROLABE RETE -->
+  <symbol id="ic1" viewBox="0 0 1024 1024">
+    <g clip-path="url(#squircle)">
+      <rect width="1024" height="1024" fill="url(#bgDeep)"/>
+      <g transform="translate(512,512)" fill="none" stroke-linecap="round">
+        <!-- graduated limb -->
+        <circle r="392" stroke="url(#brass)" stroke-width="40" stroke-dasharray="2 22" opacity=".9"/>
+        <circle r="360" stroke="url(#brass)" stroke-width="6" opacity=".75"/>
+        <!-- tropics / mater plate -->
+        <circle r="300" stroke="url(#peri)" stroke-width="4" opacity=".45"/>
+        <circle r="150" stroke="url(#peri)" stroke-width="4" opacity=".45"/>
+        <!-- eccentric ecliptic ring (the rete) -->
+        <circle cx="0" cy="-95" r="205" stroke="url(#brass)" stroke-width="9"/>
+        <!-- rule -->
+        <line x1="-355" y1="0" x2="355" y2="0" stroke="url(#peri)" stroke-width="5" opacity=".5"/>
+        <!-- rete pointer flames -> star tips -->
+        <g stroke="url(#brass)" stroke-width="7">
+          <path d="M0,-95 C 120,-230 250,-150 300,-40"/>
+          <path d="M0,-95 C -150,-200 -260,-120 -300,30"/>
+          <path d="M0,-95 C -40,140 120,250 230,210"/>
+        </g>
+      </g>
+      <!-- pointer stars -->
+      <g fill="#fff" filter="url(#glow)">
+        <use href="#dstar" transform="translate(812,472) scale(.12)"/>
+        <use href="#dstar" transform="translate(212,542) scale(.1)"/>
+        <use href="#dstar" transform="translate(742,722) scale(.1)"/>
+      </g>
+      <circle cx="512" cy="512" r="20" fill="url(#brass)" filter="url(#glow)"/>
+    </g>
+  </symbol>
+
+  <!-- 2. DIFFRACTION STAR -->
+  <symbol id="ic2" viewBox="0 0 1024 1024">
+    <g clip-path="url(#squircle)">
+      <rect width="1024" height="1024" fill="url(#bgDeep)"/>
+      <circle cx="512" cy="512" r="330" fill="#6f93ff" opacity=".12" filter="url(#glowBig)"/>
+      <use href="#dstar" transform="translate(512,512) scale(1.15)"/>
+      <!-- companion sparkles -->
+      <use href="#dstar" transform="translate(780,300) scale(.16)"/>
+      <use href="#dstar" transform="translate(250,740) scale(.12)"/>
+    </g>
+  </symbol>
+
+  <!-- 3. CELESTIAL SPHERE (great circles) -->
+  <symbol id="ic3" viewBox="0 0 1024 1024">
+    <g clip-path="url(#squircle)">
+      <rect width="1024" height="1024" fill="url(#bgCyan)"/>
+      <g transform="translate(512,512)">
+        <circle r="330" fill="url(#sphereFill)"/>
+        <circle r="330" fill="none" stroke="#6ec7ff" stroke-width="8" opacity=".5" filter="url(#glowMed)"/>
+        <g fill="none" stroke-width="7" stroke-linecap="round">
+          <!-- equator -->
+          <ellipse rx="330" ry="96" stroke="url(#cyanG)" opacity=".9"/>
+          <!-- ecliptic (tilted) -->
+          <ellipse rx="330" ry="120" transform="rotate(-23)" stroke="url(#goldG)" opacity=".95" filter="url(#glow)"/>
+          <!-- horizon / meridian vertical -->
+          <ellipse rx="118" ry="330" stroke="url(#peri)" opacity=".7"/>
+        </g>
+        <!-- poles -->
+        <line x1="0" y1="-340" x2="0" y2="340" stroke="url(#peri)" stroke-width="4" opacity=".4"/>
+        <circle r="14" fill="#fff" filter="url(#glow)"/>
+      </g>
+      <use href="#dstarGold" transform="translate(742,300) scale(.14)"/>
+    </g>
+  </symbol>
+
+  <!-- 4. RETICLE (point at sky) -->
+  <symbol id="ic4" viewBox="0 0 1024 1024">
+    <g clip-path="url(#squircle)">
+      <rect width="1024" height="1024" fill="url(#bgDeep)"/>
+      <g transform="translate(512,512)" fill="none" stroke="url(#peri)">
+        <circle r="360" stroke-width="6" stroke-dasharray="2 26" opacity=".8"/>
+        <circle r="300" stroke-width="7" stroke-dasharray="300 90" transform="rotate(-45)" opacity=".95" filter="url(#glow)"/>
+        <!-- cardinal ticks -->
+        <g stroke-width="10" stroke-linecap="round" opacity=".9">
+          <line x1="0" y1="-368" x2="0" y2="-320"/>
+          <line x1="0" y1="368" x2="0" y2="320"/>
+          <line x1="-368" y1="0" x2="-320" y2="0"/>
+          <line x1="368" y1="0" x2="320" y2="0"/>
+        </g>
+        <!-- crosshair gap -->
+        <g stroke-width="6" opacity=".55">
+          <line x1="-140" y1="0" x2="-60" y2="0"/><line x1="140" y1="0" x2="60" y2="0"/>
+          <line x1="0" y1="-140" x2="0" y2="-60"/><line x1="0" y1="140" x2="0" y2="60"/>
+        </g>
+      </g>
+      <use href="#dstar" transform="translate(512,512) scale(.62)"/>
+    </g>
+  </symbol>
+
+  <!-- 5. ECLIPTIC RING + STAR (tilted ring) -->
+  <symbol id="ic5" viewBox="0 0 1024 1024">
+    <g clip-path="url(#squircle)">
+      <rect width="1024" height="1024" fill="url(#bgViolet)"/>
+      <g transform="translate(512,512)">
+        <!-- ring back half -->
+        <path d="M -360,0 A 360 132 0 0 1 360,0" fill="none" stroke="url(#violetG)" stroke-width="20" transform="rotate(-18)" opacity=".55"/>
+        <use href="#dstar" transform="scale(.92)"/>
+        <!-- ring front half -->
+        <path d="M 360,0 A 360 132 0 0 1 -360,0" fill="none" stroke="url(#violetG)" stroke-width="22" transform="rotate(-18)" filter="url(#glow)"/>
+        <!-- a planet bead on the ring -->
+        <circle cx="300" cy="60" r="22" fill="url(#coreGold)" filter="url(#glow)" transform="rotate(-18)"/>
+      </g>
+    </g>
+  </symbol>
+
+  <!-- 6. CONSTELLATION "A" -->
+  <symbol id="ic6" viewBox="0 0 1024 1024">
+    <g clip-path="url(#squircle)">
+      <rect width="1024" height="1024" fill="url(#bgDeep)"/>
+      <g stroke="url(#peri)" stroke-width="6" fill="none" opacity=".6" stroke-linecap="round" filter="url(#glow)">
+        <path d="M340,720 L512,300 L684,720 M412,560 L612,560"/>
+      </g>
+      <g>
+        <use href="#dstar" transform="translate(512,300) scale(.2)"/>
+        <use href="#dstar" transform="translate(340,720) scale(.14)"/>
+        <use href="#dstar" transform="translate(684,720) scale(.16)"/>
+        <use href="#dstar" transform="translate(412,560) scale(.1)"/>
+        <use href="#dstar" transform="translate(612,560) scale(.1)"/>
+      </g>
+    </g>
+  </symbol>
+
+  <!-- 7. ARMILLARY SPHERE -->
+  <symbol id="ic7" viewBox="0 0 1024 1024">
+    <g clip-path="url(#squircle)">
+      <rect width="1024" height="1024" fill="url(#bgGold)"/>
+      <g transform="translate(512,512)" fill="none" stroke="url(#brass)" stroke-linecap="round">
+        <line x1="0" y1="-400" x2="0" y2="400" stroke-width="7" opacity=".55"/>
+        <circle r="300" stroke-width="9"/>
+        <ellipse rx="300" ry="300" transform="rotate(0)" stroke-width="0"/>
+        <ellipse rx="110" ry="300" stroke-width="9"/>
+        <ellipse rx="300" ry="110" stroke-width="9"/>
+        <!-- graduated equatorial band -->
+        <ellipse rx="300" ry="78" transform="rotate(-23)" stroke-width="34" stroke-dasharray="2 20" opacity=".85"/>
+        <ellipse rx="300" ry="78" transform="rotate(-23)" stroke-width="5"/>
+      </g>
+      <use href="#dstar" transform="translate(512,512) scale(.42)"/>
+    </g>
+  </symbol>
+
+  <!-- 8. GALAXY SPIRAL -->
+  <symbol id="ic8" viewBox="0 0 1024 1024">
+    <g clip-path="url(#squircle)">
+      <rect width="1024" height="1024" fill="url(#bgViolet)"/>
+      <g transform="translate(512,512)">
+        <ellipse rx="380" ry="150" transform="rotate(-25)" fill="#7a5cff" opacity=".08" filter="url(#glowBig)"/>
+        <g fill="none" stroke-linecap="round" filter="url(#glowMed)">
+          <path d="M0,0 C 120,-60 230,-30 300,90 C 350,180 250,300 120,300" stroke="url(#violetG)" stroke-width="26" opacity=".9"/>
+          <path d="M0,0 C -120,60 -230,30 -300,-90 C -350,-180 -250,-300 -120,-300" stroke="url(#cyanG)" stroke-width="26" opacity=".9"/>
+          <path d="M0,0 C 70,-130 30,-240 -120,-280" stroke="url(#violetG)" stroke-width="16" opacity=".6"/>
+          <path d="M0,0 C -70,130 -30,240 120,280" stroke="url(#cyanG)" stroke-width="16" opacity=".6"/>
+        </g>
+        <!-- core -->
+        <circle r="70" fill="url(#coreGold)" filter="url(#glowBig)"/>
+        <!-- the Sun, marked on an arm -->
+        <use href="#dstar" transform="translate(250,150) scale(.12)"/>
+      </g>
+    </g>
+  </symbol>
+
+  <!-- 9. CRESCENT + STAR (astrology / gold) -->
+  <symbol id="ic9" viewBox="0 0 1024 1024">
+    <g clip-path="url(#squircle)">
+      <rect width="1024" height="1024" fill="url(#bgGold)"/>
+      <g transform="translate(540,512)">
+        <path d="M 60,-280 A 280 280 0 1 0 60,280 A 220 220 0 1 1 60,-280 Z"
+              fill="url(#goldG)" filter="url(#glowMed)"/>
+      </g>
+      <use href="#dstarGold" transform="translate(420,430) scale(.5)"/>
+      <use href="#dstarGold" transform="translate(300,720) scale(.14)"/>
+      <use href="#dstarGold" transform="translate(700,260) scale(.1)"/>
+    </g>
+  </symbol>
+
+  <!-- 10. HORIZON DOME (sky mode) -->
+  <symbol id="ic10" viewBox="0 0 1024 1024">
+    <g clip-path="url(#squircle)">
+      <rect width="1024" height="1024" fill="url(#bgDeep)"/>
+      <!-- zenith star -->
+      <use href="#dstar" transform="translate(512,360) scale(.7)"/>
+      <!-- alt-az meridian arcs -->
+      <g fill="none" stroke="url(#peri)" stroke-linecap="round" opacity=".5">
+        <path d="M152,720 A 360 360 0 0 1 872,720" stroke-width="5"/>
+        <path d="M232,720 A 280 280 0 0 1 792,720" stroke-width="4" opacity=".7"/>
+        <path d="M512,720 L512,330" stroke-width="4"/>
+        <path d="M512,720 L300,470" stroke-width="3" opacity=".6"/>
+        <path d="M512,720 L724,470" stroke-width="3" opacity=".6"/>
+      </g>
+      <!-- graduated horizon -->
+      <line x1="120" y1="720" x2="904" y2="720" stroke="url(#periH)" stroke-width="10" stroke-linecap="round" filter="url(#glow)"/>
+      <line x1="120" y1="744" x2="904" y2="744" stroke="url(#peri)" stroke-width="14" stroke-dasharray="2 24" opacity=".8"/>
+      <!-- N marker -->
+      <circle cx="512" cy="720" r="13" fill="#fff" filter="url(#glow)"/>
+    </g>
+  </symbol>
+
+  <!-- 11. SEXTANT ARC -->
+  <symbol id="ic11" viewBox="0 0 1024 1024">
+    <g clip-path="url(#squircle)">
+      <rect width="1024" height="1024" fill="url(#bgCyan)"/>
+      <g transform="translate(420,640)" fill="none" stroke-linecap="round">
+        <!-- graduated arc -->
+        <path d="M -300,0 A 300 300 0 0 1 300,0" stroke="url(#cyanG)" stroke-width="40" stroke-dasharray="2 20" opacity=".85"/>
+        <path d="M -300,0 A 300 300 0 0 1 300,0" stroke="url(#cyanG)" stroke-width="7"/>
+        <!-- frame -->
+        <line x1="-300" y1="0" x2="300" y2="0" stroke="url(#peri)" stroke-width="9" opacity=".7"/>
+        <!-- index arm -> sighting a star -->
+        <line x1="0" y1="0" x2="170" y2="-310" stroke="url(#peri)" stroke-width="11" filter="url(#glow)"/>
+        <circle r="22" fill="url(#peri)"/>
+      </g>
+      <use href="#dstar" transform="translate(590,330) scale(.4)"/>
+    </g>
+  </symbol>
+
+  <!-- 12. ORBIT SYSTEM -->
+  <symbol id="ic12" viewBox="0 0 1024 1024">
+    <g clip-path="url(#squircle)">
+      <rect width="1024" height="1024" fill="url(#bgDeep)"/>
+      <g transform="translate(512,512)" fill="none">
+        <ellipse rx="160" ry="160" stroke="url(#peri)" stroke-width="5" opacity=".4"/>
+        <ellipse rx="270" ry="250" transform="rotate(20)" stroke="url(#peri)" stroke-width="5" opacity=".5"/>
+        <ellipse rx="380" ry="330" transform="rotate(-12)" stroke="url(#cyanG)" stroke-width="5" opacity=".55"/>
+        <!-- habitable-zone glow ring -->
+        <ellipse rx="270" ry="250" transform="rotate(20)" stroke="#7CF0B0" stroke-width="22" opacity=".1" filter="url(#glowMed)"/>
+        <!-- planets -->
+        <circle cx="160" cy="0" r="16" fill="url(#cyanG)" filter="url(#glow)"/>
+        <circle cx="-120" cy="-235" r="26" fill="url(#coreGold)" filter="url(#glow)" transform="rotate(20)"/>
+        <circle cx="370" cy="-40" r="20" fill="url(#violetG)" filter="url(#glow)" transform="rotate(-12)"/>
+      </g>
+      <use href="#dstar" transform="translate(512,512) scale(.5)"/>
+    </g>
+  </symbol>
+
+  <!-- 13. COMPASS / LODESTAR ROSE -->
+  <symbol id="ic13" viewBox="0 0 1024 1024">
+    <g clip-path="url(#squircle)">
+      <rect width="1024" height="1024" fill="url(#bgDeep)"/>
+      <g transform="translate(512,512)">
+        <circle r="350" fill="none" stroke="url(#peri)" stroke-width="5" stroke-dasharray="2 24" opacity=".7"/>
+        <!-- 4 long + 4 short rays -->
+        <g filter="url(#glowMed)">
+          <polygon points="0,-340 46,-46 0,0 -46,-46" fill="url(#peri)"/>
+          <polygon points="0,340 46,46 0,0 -46,46" fill="url(#periH)" opacity=".8"/>
+          <polygon points="340,0 46,46 0,0 46,-46" fill="url(#periH)" opacity=".8"/>
+          <polygon points="-340,0 -46,46 0,0 -46,-46" fill="url(#periH)" opacity=".8"/>
+          <g opacity=".55">
+            <polygon points="200,-200 40,-30 0,0 30,-40" fill="url(#peri)"/>
+            <polygon points="-200,-200 -30,-40 0,0 -40,-30" fill="url(#peri)"/>
+            <polygon points="200,200 30,40 0,0 40,30" fill="url(#peri)"/>
+            <polygon points="-200,200 -40,30 0,0 -30,40" fill="url(#peri)"/>
+          </g>
+        </g>
+        <!-- north pole star -->
+        <use href="#dstar" transform="translate(0,-340) scale(.2)"/>
+        <circle r="26" fill="#fff" filter="url(#glow)"/>
+      </g>
+    </g>
+  </symbol>
+
+  <!-- 14. THE APERTURE (minimal concentric) -->
+  <symbol id="ic14" viewBox="0 0 1024 1024">
+    <g clip-path="url(#squircle)">
+      <rect width="1024" height="1024" fill="url(#bgDeep)"/>
+      <g transform="translate(512,512)" fill="none">
+        <circle r="370" stroke="url(#peri)" stroke-width="4" opacity=".25"/>
+        <circle r="280" stroke="url(#peri)" stroke-width="5" opacity=".45"/>
+        <circle r="190" stroke="url(#periH)" stroke-width="6" opacity=".7" filter="url(#glow)"/>
+        <circle r="370" stroke="url(#peri)" stroke-width="3" stroke-dasharray="2 30" opacity=".5"/>
+      </g>
+      <use href="#dstar" transform="translate(512,512) scale(.46)"/>
+    </g>
+  </symbol>
+
+  <!-- 15. ZODIAC / CHART WHEEL -->
+  <symbol id="ic15" viewBox="0 0 1024 1024">
+    <g clip-path="url(#squircle)">
+      <rect width="1024" height="1024" fill="url(#bgGold)"/>
+      <g transform="translate(512,512)" fill="none" stroke-linecap="round">
+        <circle r="370" stroke="url(#goldG)" stroke-width="6" opacity=".55"/>
+        <circle r="300" stroke="url(#goldG)" stroke-width="6" opacity=".8"/>
+        <!-- 12 spokes -->
+        <g stroke="url(#goldG)" stroke-width="4" opacity=".55">
+          <line x1="300" y1="0" x2="370" y2="0"/>
+          <line x1="259.8" y1="150" x2="320.4" y2="185"/>
+          <line x1="150" y1="259.8" x2="185" y2="320.4"/>
+          <line x1="0" y1="300" x2="0" y2="370"/>
+          <line x1="-150" y1="259.8" x2="-185" y2="320.4"/>
+          <line x1="-259.8" y1="150" x2="-320.4" y2="185"/>
+          <line x1="-300" y1="0" x2="-370" y2="0"/>
+          <line x1="-259.8" y1="-150" x2="-320.4" y2="-185"/>
+          <line x1="-150" y1="-259.8" x2="-185" y2="-320.4"/>
+          <line x1="0" y1="-300" x2="0" y2="-370"/>
+          <line x1="150" y1="-259.8" x2="185" y2="-320.4"/>
+          <line x1="259.8" y1="-150" x2="320.4" y2="-185"/>
+        </g>
+        <!-- inner aspect chords -->
+        <g stroke-width="4" opacity=".55">
+          <line x1="0" y1="-300" x2="259.8" y2="150" stroke="url(#violetG)"/>
+          <line x1="259.8" y1="150" x2="-259.8" y2="150" stroke="url(#cyanG)"/>
+          <line x1="-259.8" y1="150" x2="0" y2="-300" stroke="url(#violetG)"/>
+        </g>
+      </g>
+      <use href="#dstarGold" transform="translate(512,512) scale(.3)"/>
+    </g>
+  </symbol>
+</defs>
+</svg>
+
+<div class="wrap">
+
+  <header class="hero">
+    <div class="eyebrow">Identity Study · iOS App</div>
+    <h1 class="serif">Astrolabe</h1>
+    <p class="tagline">App-icon directions &amp; a final-name shortlist — drawn from the app itself: a point-at-the-sky planetarium with real astrophysics and a full astrology layer.</p>
+    <p class="lead">Every icon below is a hand-built SVG sharing the app's “<strong>luminous instrument</strong>” language — periwinkle light over deep space, serif-cool restraint, and the signature diffraction-spiked star the renderer already draws. Each is shown at icon size plus 80&nbsp;px and 40&nbsp;px so you can judge how it survives on the Home Screen and in Spotlight. Fifteen concepts, grouped by the idea they lead with.</p>
+  </header>
+
+  <!-- ================= NAMING ================= -->
+  <h2 class="section">Part One</h2>
+  <div class="section-title serif">The Name</div>
+  <p class="section-sub">The working title already fits unusually well: an astrolabe was the one instrument that did <em>both</em> jobs this app does — measure the real sky <em>and</em> cast a horoscope from it. That dual heritage is exactly our science-plus-symbolism split. Here's the case for keeping it, plus alternates if you want something more ownable.</p>
+
+  <div class="names">
+    <div class="name-card pick">
+      <span class="tag keep">Recommended · keep</span>
+      <h3 class="serif">Astrolabe</h3>
+      <div class="pron">AS-troh-layb</div>
+      <p>The historical instrument for measuring star altitude, telling time, and — yes — casting charts. It literally means “star-taker.” Perfect thematic fit for an app that points at the sky <em>and</em> reads it astrologically. Risk: somewhat generic / possibly taken on the App Store. Mitigate with a distinct icon + a tagline lockup (“Astrolabe — chart the heavens”).</p>
+    </div>
+    <div class="name-card">
+      <span class="tag alt">Alternate</span>
+      <h3 class="serif">Almagest</h3>
+      <div class="pron">AL-muh-jest</div>
+      <p>Ptolemy's great star catalog — “The Greatest.” Carries both the astronomy <em>and</em> astrology lineage in one word, and is far more ownable than Astrolabe. Slightly academic; rewards the curious user the app is built for.</p>
+    </div>
+    <div class="name-card">
+      <span class="tag alt">Alternate</span>
+      <h3 class="serif">Rete</h3>
+      <div class="pron">REE-tee</div>
+      <p>The pierced, star-pointer disc that <em>is</em> the working part of an astrolabe — the open map of stars that rotates over the plate. Short, modern, ownable, and quietly insider. A great fit if you want a one-syllable mark.</p>
+    </div>
+    <div class="name-card">
+      <span class="tag alt">Alternate</span>
+      <h3 class="serif">Caelum</h3>
+      <div class="pron">KY-lum</div>
+      <p>Latin for “the heavens / chisel,” and also a real (if faint) constellation. Soft, elegant, gender-neutral; reads beautifully in a serif wordmark. Very ownable.</p>
+    </div>
+    <div class="name-card">
+      <span class="tag bold">Bolder</span>
+      <h3 class="serif">Orrery</h3>
+      <div class="pron">OR-uh-ree</div>
+      <p>A clockwork model of the heavens. Evokes the precision-instrument beauty you're chasing in the Galaxy Map and celestial sphere. Leans astronomy over astrology, but lovely and distinctive.</p>
+    </div>
+    <div class="name-card">
+      <span class="tag bold">Bolder</span>
+      <h3 class="serif">Armilla</h3>
+      <div class="pron">ar-MIL-uh</div>
+      <p>From the armillary sphere — rings of the heavens around the Earth. Maps directly onto the ★ celestial-sphere feature. Warmer and more name-like than “Armillary.”</p>
+    </div>
+    <div class="name-card">
+      <span class="tag bold">Bolder</span>
+      <h3 class="serif">Empyrean</h3>
+      <div class="pron">em-PEER-ee-an</div>
+      <p>The highest heaven, the realm of pure starlight. Romantic, premium, memorable. Less literal than the instrument names — sells the <em>beauty</em> pillar over the science one.</p>
+    </div>
+    <div class="name-card">
+      <span class="tag alt">Wildcard</span>
+      <h3 class="serif">Sidereal</h3>
+      <div class="pron">sy-DEER-ee-al</div>
+      <p>“Of the stars” — and the literal name of the star-time and zodiac system the engine computes. A technical word the right audience will love; harder to spell on first hearing.</p>
+    </div>
+  </div>
+  <p class="section-sub" style="margin-top:6px"><strong>My pick:</strong> keep <em>Astrolabe</em> if the App Store name is free — nothing else fits the dual mission as cleanly. If it's taken or you want something more uniquely yours, <em>Almagest</em> and <em>Rete</em> are the strongest fallbacks, in that order.</p>
+
+  <hr class="div">
+
+  <!-- ================= ICONS ================= -->
+  <h2 class="section">Part Two</h2>
+  <div class="section-title serif">The Icon</div>
+  <p class="section-sub">Five families: <strong>the namesake instruments</strong>, <strong>the signature star</strong>, <strong>the celestial sphere</strong>, <strong>the act of looking</strong>, and <strong>the cosmos itself</strong>. The strongest at thumbnail size are #2, #5, #3, #13 and #14 — noted on each card.</p>
+
+  <div class="grid">
+
+    <!-- 1 -->
+    <div class="icard">
+      <div class="icon-hero"><svg><use href="#ic1"/></svg></div>
+      <div class="chips"><span class="lbl">also at</span><svg width="80" height="80"><use href="#ic1"/></svg><svg width="40" height="40"><use href="#ic1"/></svg></div>
+      <h3><span class="num">1</span>The Rete</h3>
+      <p class="role">Family · Namesake instrument</p>
+      <dl class="meta">
+        <dt>Inspiration</dt><dd>A literal astrolabe seen face-on: graduated brass limb, the off-centre eccentric circle of the ecliptic, the rule, and the pierced star-pointer “flames” of the rete, each ending in a real star.</dd>
+        <dt>Meaning</dt><dd>The most on-the-nose telling of the name — this <em>is</em> an astrolabe. It says “precision instrument for the heavens” before you open the app, and bridges science + symbolism the way the device historically did.</dd>
+        <dt>Details</dt><dd>Brass-gold over deep space for an heirloom, hand-tool feel. Richest of the set — gorgeous large, but watch legibility at 40&nbsp;px; the simplest reading is the limb + central pin.</dd>
+      </dl>
+      <div class="palette"><span class="sw" style="background:#04030c"></span><span class="sw" style="background:#D6A24E"></span><span class="sw" style="background:#FCE6AE"></span><span class="sw" style="background:#8FB8FF"></span></div>
+    </div>
+
+    <!-- 2 -->
+    <div class="icard">
+      <div class="icon-hero"><svg><use href="#ic2"/></svg></div>
+      <div class="chips"><span class="lbl">also at</span><svg width="80" height="80"><use href="#ic2"/></svg><svg width="40" height="40"><use href="#ic2"/></svg></div>
+      <h3><span class="num">2</span>The Diffraction Star ★</h3>
+      <p class="role">Family · Signature star · top thumbnail</p>
+      <dl class="meta">
+        <dt>Inspiration</dt><dd>The exact star the app already renders — a four-point diffraction-spiked sparkle with a glowing core and a soft atmosphere halo, the way the catalog and celestial sphere draw the brightest stars.</dd>
+        <dt>Meaning</dt><dd>Pure, confident, unmistakable. One real star, beautifully lit — the whole app distilled to its atom. It promises light and wonder, not features.</dd>
+        <dt>Details</dt><dd>Survives shrinking better than anything here and is instantly “Astrolabe” once the brand is known. White-to-periwinkle core; companion sparkles keep it from feeling like a generic asterisk. The safest, most scalable choice.</dd>
+      </dl>
+      <div class="palette"><span class="sw" style="background:#03030c"></span><span class="sw" style="background:#9FBEFF"></span><span class="sw" style="background:#ffffff"></span><span class="sw" style="background:#6f93ff"></span></div>
+    </div>
+
+    <!-- 3 -->
+    <div class="icard">
+      <div class="icon-hero"><svg><use href="#ic3"/></svg></div>
+      <div class="chips"><span class="lbl">also at</span><svg width="80" height="80"><use href="#ic3"/></svg><svg width="40" height="40"><use href="#ic3"/></svg></div>
+      <h3><span class="num">3</span>The Celestial Sphere ★</h3>
+      <p class="role">Family · Celestial sphere · the moat feature</p>
+      <dl class="meta">
+        <dt>Inspiration</dt><dd>The ★ differentiator screen — the rotating luminous globe — reduced to three great circles through one sphere: the cyan celestial equator, the gold ecliptic tilted at 23.5°, and the periwinkle meridian, with an atmosphere rim.</dd>
+        <dt>Meaning</dt><dd>This is the icon that says “we actually have a sky <em>engine</em>.” The crossing circles are the coordinate transforms that are the spine of the whole project; the gold ecliptic is where astronomy hands off to the zodiac.</dd>
+        <dt>Details</dt><dd>Three colours encode the three frames (horizon / equator / ecliptic). Reads as a globe even small; the tilted gold ring is the memorable silhouette. The most “this app and no other” concept.</dd>
+      </dl>
+      <div class="palette"><span class="sw" style="background:#02060f"></span><span class="sw" style="background:#3FC8E6"></span><span class="sw" style="background:#E9B257"></span><span class="sw" style="background:#8FB8FF"></span></div>
+    </div>
+
+    <!-- 4 -->
+    <div class="icard">
+      <div class="icon-hero"><svg><use href="#ic4"/></svg></div>
+      <div class="chips"><span class="lbl">also at</span><svg width="80" height="80"><use href="#ic4"/></svg><svg width="40" height="40"><use href="#ic4"/></svg></div>
+      <h3><span class="num">4</span>The Reticle</h3>
+      <p class="role">Family · The act of looking</p>
+      <dl class="meta">
+        <dt>Inspiration</dt><dd>The AR “point at the sky” core interaction — the centre reticle and cardinal-tick HUD from Sky mode, framing a bright star you've just aimed at and identified.</dd>
+        <dt>Meaning</dt><dd>Leads with the <em>verb</em>: this is the app you raise to the heavens to take a sighting. Active, exploratory, a little sci-fi cockpit.</dd>
+        <dt>Details</dt><dd>The dashed graduated ring + crosshair gap read as an instrument, not a camera app. Risk of looking like a generic AR/target icon — the star in the centre is what keeps it ours.</dd>
+      </dl>
+      <div class="palette"><span class="sw" style="background:#03030c"></span><span class="sw" style="background:#8FB8FF"></span><span class="sw" style="background:#BCD4FF"></span><span class="sw" style="background:#ffffff"></span></div>
+    </div>
+
+    <!-- 5 -->
+    <div class="icard">
+      <div class="icon-hero"><svg><use href="#ic5"/></svg></div>
+      <div class="chips"><span class="lbl">also at</span><svg width="80" height="80"><use href="#ic5"/></svg><svg width="40" height="40"><use href="#ic5"/></svg></div>
+      <h3><span class="num">5</span>The Ecliptic Ring ★</h3>
+      <p class="role">Family · Celestial sphere · top thumbnail</p>
+      <dl class="meta">
+        <dt>Inspiration</dt><dd>A single tilted ring — the ecliptic / zodiac belt — banking in perspective around a glowing central star, with one planet bead riding the band. Saturn-ring elegance meets the wheel of the zodiac.</dd>
+        <dt>Meaning</dt><dd>The cleanest fusion of the two layers: the <em>star</em> (astrophysics) inside the <em>ring of the path of the Sun</em> (astrology). Calm, premium, and very ownable as a silhouette.</dd>
+        <dt>Details</dt><dd>The strong 3D bank gives instant depth and brand-shape recognition. Shown here in violet, but recolours cleanly to periwinkle or gold. Among the best small-size performers.</dd>
+      </dl>
+      <div class="palette"><span class="sw" style="background:#05030f"></span><span class="sw" style="background:#8A5CF0"></span><span class="sw" style="background:#D9C6FF"></span><span class="sw" style="background:#F5CE7A"></span></div>
+    </div>
+
+    <!-- 6 -->
+    <div class="icard">
+      <div class="icon-hero"><svg><use href="#ic6"/></svg></div>
+      <div class="chips"><span class="lbl">also at</span><svg width="80" height="80"><use href="#ic6"/></svg><svg width="40" height="40"><use href="#ic6"/></svg></div>
+      <h3><span class="num">6</span>The Asterism “A”</h3>
+      <p class="role">Family · The cosmos · wordmark tie-in</p>
+      <dl class="meta">
+        <dt>Inspiration</dt><dd>The constellation browser's connect-the-dots figures, bent into a stylised letter “A” — five catalog stars joined by faint sightlines.</dd>
+        <dt>Meaning</dt><dd>A monogram that's <em>also</em> a constellation: the brand initial written in stars. Playful, friendly, immediately “app-like,” and a natural for a wordmark lockup.</dd>
+        <dt>Details</dt><dd>Most legible monogram here; the trade-off is it leans cute over awe and is the least uniquely-astronomical. Great as a secondary / marketing mark even if not the primary.</dd>
+      </dl>
+      <div class="palette"><span class="sw" style="background:#03030c"></span><span class="sw" style="background:#8FB8FF"></span><span class="sw" style="background:#ffffff"></span><span class="sw" style="background:#7FA8FF"></span></div>
+    </div>
+
+    <!-- 7 -->
+    <div class="icard">
+      <div class="icon-hero"><svg><use href="#ic7"/></svg></div>
+      <div class="chips"><span class="lbl">also at</span><svg width="80" height="80"><use href="#ic7"/></svg><svg width="40" height="40"><use href="#ic7"/></svg></div>
+      <h3><span class="num">7</span>The Armillary</h3>
+      <p class="role">Family · Namesake instrument</p>
+      <dl class="meta">
+        <dt>Inspiration</dt><dd>An armillary sphere — graduated brass rings of the heavens (equator, meridian, ecliptic band) around a polar axis, with a star at the heart.</dd>
+        <dt>Meaning</dt><dd>The “antique cosmology made beautiful” pillar. Companion to the celestial-sphere concept but rendered as a physical, hand-made object rather than a glowing globe.</dd>
+        <dt>Details</dt><dd>Warm brass = heritage and craft. Detailed, so best appreciated large; at 40&nbsp;px it simplifies to a ringed orb. Pairs naturally with the “Armilla” name.</dd>
+      </dl>
+      <div class="palette"><span class="sw" style="background:#040309"></span><span class="sw" style="background:#D6A24E"></span><span class="sw" style="background:#FCE6AE"></span><span class="sw" style="background:#ffffff"></span></div>
+    </div>
+
+    <!-- 8 -->
+    <div class="icard">
+      <div class="icon-hero"><svg><use href="#ic8"/></svg></div>
+      <div class="chips"><span class="lbl">also at</span><svg width="80" height="80"><use href="#ic8"/></svg><svg width="40" height="40"><use href="#ic8"/></svg></div>
+      <h3><span class="num">8</span>The Galaxy</h3>
+      <p class="role">Family · The cosmos</p>
+      <dl class="meta">
+        <dt>Inspiration</dt><dd>Galaxy Map mode — the stylised barred spiral with a blazing core and the Sun marked as a single sparkle out on one arm.</dd>
+        <dt>Meaning</dt><dd>Sells the <em>scale</em> and the Elite-Dangerous free-flight fantasy: leave Earth and fly the real local star field. The marked Sun is the “you are here” promise.</dd>
+        <dt>Details</dt><dd>Violet + cyan arms over deep space — the most overtly “space app” of the set, with the upside and the cliché risk that implies. The dual-colour arms keep it from being a stock swirl.</dd>
+      </dl>
+      <div class="palette"><span class="sw" style="background:#05030f"></span><span class="sw" style="background:#8A5CF0"></span><span class="sw" style="background:#3FC8E6"></span><span class="sw" style="background:#F0B85C"></span></div>
+    </div>
+
+    <!-- 9 -->
+    <div class="icard">
+      <div class="icon-hero"><svg><use href="#ic9"/></svg></div>
+      <div class="chips"><span class="lbl">also at</span><svg width="80" height="80"><use href="#ic9"/></svg><svg width="40" height="40"><use href="#ic9"/></svg></div>
+      <h3><span class="num">9</span>The Crescent</h3>
+      <p class="role">Family · The cosmos · astrology tint</p>
+      <dl class="meta">
+        <dt>Inspiration</dt><dd>The app's astrology accent — <code>moon.stars.fill</code> in warm gold — a crescent cradling the signature star.</dd>
+        <dt>Meaning</dt><dd>Speaks directly to the astrology / charts audience and the “Tonight” moon-phase feed. Warm, inviting, lifestyle-friendly.</dd>
+        <dt>Details</dt><dd>Honest about a trade-off: this is the most <em>conventional</em> celestial icon and risks reading as “just another astrology app,” which undersells the science half. Included as the gold-family option and a possible alternate app icon.</dd>
+      </dl>
+      <div class="palette"><span class="sw" style="background:#040309"></span><span class="sw" style="background:#E9B257"></span><span class="sw" style="background:#FFE9B0"></span><span class="sw" style="background:#fffaf0"></span></div>
+    </div>
+
+    <!-- 10 -->
+    <div class="icard">
+      <div class="icon-hero"><svg><use href="#ic10"/></svg></div>
+      <div class="chips"><span class="lbl">also at</span><svg width="80" height="80"><use href="#ic10"/></svg><svg width="40" height="40"><use href="#ic10"/></svg></div>
+      <h3><span class="num">10</span>The Horizon Dome</h3>
+      <p class="role">Family · The act of looking</p>
+      <dl class="meta">
+        <dt>Inspiration</dt><dd>The alt-az projection itself: a graduated horizon with the north marker, vertical meridian and altitude arcs sweeping up to a zenith star — the geometry Sky mode draws every frame.</dd>
+        <dt>Meaning</dt><dd>“You, standing under the real sky, here and now.” The most grounded, observational concept — it foregrounds <em>your</em> horizon, not abstract space.</dd>
+        <dt>Details</dt><dd>Distinctive composition (anchored to a baseline rather than centred). Loses its fine ticks when tiny, simplifying to dome-plus-star, which still reads.</dd>
+      </dl>
+      <div class="palette"><span class="sw" style="background:#03030c"></span><span class="sw" style="background:#8FB8FF"></span><span class="sw" style="background:#BCD4FF"></span><span class="sw" style="background:#ffffff"></span></div>
+    </div>
+
+    <!-- 11 -->
+    <div class="icard">
+      <div class="icon-hero"><svg><use href="#ic11"/></svg></div>
+      <div class="chips"><span class="lbl">also at</span><svg width="80" height="80"><use href="#ic11"/></svg><svg width="40" height="40"><use href="#ic11"/></svg></div>
+      <h3><span class="num">11</span>The Sextant</h3>
+      <p class="role">Family · Namesake instrument</p>
+      <dl class="meta">
+        <dt>Inspiration</dt><dd>A navigator's sextant — graduated arc, frame, and an index arm swung up to “shoot” a star. A cousin of the astrolabe: measuring altitude to find your place.</dd>
+        <dt>Meaning</dt><dd>Wayfinding and precision. Ties the act of sighting a star to literally locating yourself — the sensor-fusion heart of the app.</dd>
+        <dt>Details</dt><dd>Asymmetric, dynamic composition with strong diagonal energy. Cyan instrument over deep blue. Reads as “tool,” which differentiates it from every soft celestial-blob competitor.</dd>
+      </dl>
+      <div class="palette"><span class="sw" style="background:#02060f"></span><span class="sw" style="background:#3FC8E6"></span><span class="sw" style="background:#BFF4FF"></span><span class="sw" style="background:#8FB8FF"></span></div>
+    </div>
+
+    <!-- 12 -->
+    <div class="icard">
+      <div class="icon-hero"><svg><use href="#ic12"/></svg></div>
+      <div class="chips"><span class="lbl">also at</span><svg width="80" height="80"><use href="#ic12"/></svg><svg width="40" height="40"><use href="#ic12"/></svg></div>
+      <h3><span class="num">12</span>The System</h3>
+      <p class="role">Family · The cosmos</p>
+      <dl class="meta">
+        <dt>Inspiration</dt><dd>The exoplanet “fly to a star, see its planets” view — a host star with concentric, tilted orbits, coloured planet beads, and a faint green habitable-zone ring.</dd>
+        <dt>Meaning</dt><dd>Depth and discovery — the reward for curiosity. Says “there are real worlds in here,” which is the exoplanet layer's whole promise.</dd>
+        <dt>Details</dt><dd>The off-axis ellipses give 3D life. Risk: orbit motifs can read “science textbook / atom.” The diffraction star at the centre (not a dot) keeps it celestial rather than chemical.</dd>
+      </dl>
+      <div class="palette"><span class="sw" style="background:#03030c"></span><span class="sw" style="background:#8FB8FF"></span><span class="sw" style="background:#3FC8E6"></span><span class="sw" style="background:#F0B85C"></span></div>
+    </div>
+
+    <!-- 13 -->
+    <div class="icard">
+      <div class="icon-hero"><svg><use href="#ic13"/></svg></div>
+      <div class="chips"><span class="lbl">also at</span><svg width="80" height="80"><use href="#ic13"/></svg><svg width="40" height="40"><use href="#ic13"/></svg></div>
+      <h3><span class="num">13</span>The Lodestar Rose ★</h3>
+      <p class="role">Family · The act of looking · top thumbnail</p>
+      <dl class="meta">
+        <dt>Inspiration</dt><dd>A compass / wind rose fused with a star — the long north ray reaching up to a pole star, on a graduated bezel. Navigation meets the sky.</dd>
+        <dt>Meaning</dt><dd>Orientation and true north — the app references everything to true north via the sensors. A timeless “find your way by the stars” symbol with built-in gravitas.</dd>
+        <dt>Details</dt><dd>Bold, symmetric, crest-like silhouette that reads beautifully tiny — one of the best thumbnail performers. Familiar enough to trust, distinctive in the star treatment.</dd>
+      </dl>
+      <div class="palette"><span class="sw" style="background:#03030c"></span><span class="sw" style="background:#8FB8FF"></span><span class="sw" style="background:#BCD4FF"></span><span class="sw" style="background:#ffffff"></span></div>
+    </div>
+
+    <!-- 14 -->
+    <div class="icard">
+      <div class="icon-hero"><svg><use href="#ic14"/></svg></div>
+      <div class="chips"><span class="lbl">also at</span><svg width="80" height="80"><use href="#ic14"/></svg><svg width="40" height="40"><use href="#ic14"/></svg></div>
+      <h3><span class="num">14</span>The Aperture ★</h3>
+      <p class="role">Family · Signature star · top thumbnail</p>
+      <dl class="meta">
+        <dt>Inspiration</dt><dd>The most reduced idea: three concentric hairline rings — the astrolabe's plates, an aperture, an iris on the cosmos — closing onto a single luminous star. The “luminous instrument” design system itself, as a mark.</dd>
+        <dt>Meaning</dt><dd>Focus, depth, looking <em>in</em> to look <em>out</em>. Pure abstraction means maximum ownability and zero cliché — it could only be this app.</dd>
+        <dt>Details</dt><dd>The most minimal, modern, and timeless option; scales perfectly and ages well. A graduated dashed outer ring is the only nod to the instrument heritage. Quiet — its strength and its risk.</dd>
+      </dl>
+      <div class="palette"><span class="sw" style="background:#03030c"></span><span class="sw" style="background:#8FB8FF"></span><span class="sw" style="background:#BCD4FF"></span><span class="sw" style="background:#ffffff"></span></div>
+    </div>
+
+    <!-- 15 -->
+    <div class="icard">
+      <div class="icon-hero"><svg><use href="#ic15"/></svg></div>
+      <div class="chips"><span class="lbl">also at</span><svg width="80" height="80"><use href="#ic15"/></svg><svg width="40" height="40"><use href="#ic15"/></svg></div>
+      <h3><span class="num">15</span>The Chart Wheel</h3>
+      <p class="role">Family · The cosmos · astrology</p>
+      <dl class="meta">
+        <dt>Inspiration</dt><dd>The <code>ChartWheel</code> — a twelve-spoke zodiac ring with aspect chords crossing the interior, drawn in gold.</dd>
+        <dt>Meaning</dt><dd>The astrology module made literal: houses, signs, and the geometry of aspects. Speaks fluently to chart-readers.</dd>
+        <dt>Details</dt><dd>Like #9, this is the explicitly-astrology option and risks under-selling the science half. Strongest as an <em>alternate</em> app icon users could switch to, or the Astrology tab's mark — pairing well with #3 or #5 as the primary.</dd>
+      </dl>
+      <div class="palette"><span class="sw" style="background:#040309"></span><span class="sw" style="background:#E9B257"></span><span class="sw" style="background:#8A5CF0"></span><span class="sw" style="background:#3FC8E6"></span></div>
+    </div>
+
+  </div>
+
+  <div class="footer">
+    <p class="serif">Astrolabe — chart the heavens.</p>
+    <p>15 directions · hand-built SVG · sharing the app's periwinkle-on-deep-space “luminous instrument” palette.<br>
+    My shortlist for the primary icon: <strong>#3 Celestial Sphere</strong> (most uniquely ours), <strong>#5 Ecliptic Ring</strong> (most elegant fusion), <strong>#14 Aperture</strong> (most timeless), with <strong>#2 Diffraction Star</strong> as the safe, ultra-scalable default.</p>
+  </div>
+
+</div>
+</body>
+</html>

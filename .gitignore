@@ -8,6 +8,7 @@ Package.resolved
 
 # Xcode
 DerivedData/
+build/
 *.xcodeproj/xcuserdata/
 *.xcworkspace/xcuserdata/
 xcuserdata/
