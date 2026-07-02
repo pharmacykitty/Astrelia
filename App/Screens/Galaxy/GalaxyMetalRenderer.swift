@@ -566,6 +566,12 @@ final class GalaxyMetalRenderer: NSObject {
                 lensTarget.colorAttachments[0].texture = lensOut
                 lensTarget.colorAttachments[0].loadAction = .dontCare
                 lensTarget.colorAttachments[0].storeAction = .store
+                // The lens pipeline declares a depth32 attachment (it needs one when
+                // targeting the drawable); Metal API validation asserts if the pass
+                // has none, so attach the same-size scene depth as a bystander.
+                lensTarget.depthAttachment.texture = sceneDepth
+                lensTarget.depthAttachment.loadAction = .dontCare
+                lensTarget.depthAttachment.storeAction = .dontCare
             } else {
                 lensTarget = rpd
             }

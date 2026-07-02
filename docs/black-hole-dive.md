@@ -61,7 +61,11 @@
 >   (the heaviest march band); `-galaxyBH -dive` spawns free-fly at 9 rs inbound so the
 >   trigger fires; `-fpsLog` prints frame rate + lens scale every ~2 s; `-dumpDive`
 >   writes the lens output to Documents every 2.5 s (the GPU's ground truth — sim
->   chrome can wedge mid-dive while the Metal layer plays on).
+>   chrome can wedge mid-dive while the Metal layer plays on). **Always smoke-test new
+>   passes with Metal API validation** (`SIMCTL_CHILD_MTL_DEBUG_LAYER=1 simctl launch …`):
+>   Xcode runs enable it by default, so an attachment/pixel-format mismatch that sails
+>   through a bare `simctl` run traps as a "freeze" the moment the app runs from Xcode
+>   (this bit us: the reduced-res lens pass lacked a depth attachment its PSO declared).
 >
 > **Not yet done:** on-device verification (trigger, perf, HUD liveness), Kerr spin /
 > frame-dragging, bake longitude-seam wrap, and the SwiftUI AttributeGraph wedge under
