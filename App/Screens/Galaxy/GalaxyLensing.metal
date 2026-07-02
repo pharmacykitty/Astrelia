@@ -235,16 +235,18 @@ fragment float4 lens_fragment(LensVSOut in [[stage_in]],
         float4 clip = u.viewProj * float4(outDir * 60000.0, 1.0);
         if (clip.w > 0.0) {
             float2 suv = float2(clip.x / clip.w * 0.5 + 0.5, 0.5 - clip.y / clip.w * 0.5);
-            // Fade the screen-space contribution out near the frame edge so the
-            // handoff to the baked panorama is invisible.
             float2 m = min(suv, 1.0 - suv);
-            screenW = saturate(min(m.x, m.y) / 0.04);
+            screenW = saturate(min(m.x, m.y) / 0.015);
             if (screenW > 0.0) {
                 float4 s = sceneTex.sample(smp, suv);
                 bg = s.rgb; bgA = s.a;
             }
         }
-        float bakeW = max(1.0 - screenW, u.bakeMix);
+        // Only rays the hole actually BENT may fall back to the baked panorama —
+        // an unbent edge pixel must keep its own screen sample, or the bake's warm
+        // wash paints a border around the whole frame wherever the lens is active.
+        float bent = saturate((1.0 - dot(outDir, dir)) * 400.0);
+        float bakeW = max((1.0 - screenW) * bent, u.bakeMix);
         if (bakeW > 0.001) {
             float4 b = skyTex.sample(smp, bh_equirect(outDir));
             // The bake resolves individual stars but under-samples the soft bulge

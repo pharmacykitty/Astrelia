@@ -1007,7 +1007,22 @@ struct GalaxyMapView: View {
         let triggerR = Float(hole.radiusParsecs) * DivePhysics.captureRadiusRs
         guard simd_distance(previous, hole.positionParsecs) > triggerR,
               segmentDistance(previous, current, to: hole.positionParsecs) <= triggerR else { return }
-        startDive(velocity: dt > 1e-4 ? (current - previous) / dt : .zero)
+        // The fall starts where your path PIERCED the sphere: one fast tick can
+        // carry the eye far past (even through) the hole, and a dive begun out
+        // there looks at empty sky while gravity slowly reels you back.
+        let d = current - previous
+        let dd = simd_length_squared(d)
+        if dd > 1e-9 {
+            let m = previous - hole.positionParsecs
+            let b = simd_dot(m, d) / dd
+            let c = (simd_length_squared(m) - triggerR * triggerR) / dd
+            let disc = b * b - c
+            if disc >= 0 {
+                let t = max(0, min(1, -b - disc.squareRoot()))
+                eye = previous + d * t   // on your own flight path — no visual cut
+            }
+        }
+        startDive(velocity: dt > 1e-4 ? d / dt : .zero)
     }
 
     private func startDive(velocity: SIMD3<Float>) {
