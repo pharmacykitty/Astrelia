@@ -39,18 +39,8 @@ struct GalaxyScene {
     var overlay: [GalaxySprite] = []       // dark dust / horizons (srcAlpha, 1−srcAlpha)
 }
 
-/// Imperative side-channel from the fly loop to the renderer for dive playback.
-/// The dive must not depend on a SwiftUI render to start or advance: under the
-/// 60 Hz flight churn SwiftUI's update graph can wedge (observed on simulator,
-/// AttributeGraph cycle) and stop pushing cameras entirely — the display link
-/// keeps running regardless, so the renderer reads this box directly each frame.
-@MainActor
-final class DiveChannel {
-    var start: Date?
-    var entryEye = SIMD3<Float>(0, 0, 0)
-    var entryForward = SIMD3<Float>(0, 0, -1)
-    var reduceMotion = false
-}
+// DiveChannel + DivePhysics (the free-fall integration the renderer runs while
+// diving) live in BlackHoleDive.swift.
 
 /// Dive staging pushed into the lens pass (all 0 = the hole just sits there).
 /// Swift sequences the beats; the shader stays dumb (docs/black-hole-dive.md).
@@ -85,15 +75,7 @@ struct GalaxyCamera {
     var tanHalfW: Float = 1
     var tanHalfH: Float = 1
     var dive = DiveStage()
-
-    // Dive playback (the easter egg): while `diveStart` is set the RENDERER owns
-    // the camera — pose and stage are pure functions of wall-clock time, computed
-    // per display-link frame. SwiftUI only narrates (HUD text at a few Hz); a 60 Hz
-    // @State camera loop starves SwiftUI rendering entirely on the simulator.
-    var diveStart: Date?
-    var diveEntryEye: SIMD3<Float> = .zero
-    var diveEntryForward: SIMD3<Float> = SIMD3(0, 0, -1)
-    var diveReduceMotion = false
+    // For the renderer-side dive camera (it rebuilds the projection while falling).
     var fovY: Float = 0.9
     var aspect: Float = 0.5
 }
@@ -393,33 +375,78 @@ final class GalaxyMetalRenderer: NSObject {
     /// predate the trigger, but it already carries the hole/fov parameters.
     var diveChannel: DiveChannel?
 
-    private func applyDiveCamera() {
-        guard camera.holeRs > 0, let start = diveChannel?.start ?? camera.diveStart else { return }
-        let entryEye = diveChannel?.start != nil ? diveChannel!.entryEye : camera.diveEntryEye
-        let entryForward = diveChannel?.start != nil ? diveChannel!.entryForward : camera.diveEntryForward
-        let reduceMotion = diveChannel?.start != nil ? diveChannel!.reduceMotion : camera.diveReduceMotion
-        let p = min(1, Date().timeIntervalSince(start) / DiveTimeline.duration)
-        camera.dive = DiveTimeline.stage(at: p, reduceMotion: reduceMotion)
+    // Free-fall state, integrated per display-link frame from the handoff's actual
+    // position/velocity (DivePhysics). Renderer-owned: the dive must not depend on
+    // a SwiftUI render to start or advance.
+    private var diveActive = false
+    private var divePos = SIMD3<Float>(0, 0, 0)
+    private var diveVel = SIMD3<Float>(0, 0, 0)
+    private var diveForward = SIMD3<Float>(0, 0, -1)
+    private var diveRoll: Float = 0
+    private(set) var diveNarrativeR: Float = .infinity   // rs units
 
-        let axis = simd_normalize(camera.holePos - entryEye)
-        // Ease the view onto the infall axis over the opening beat.
-        let a = Float(min(1, p / 0.12))
-        let eased = a * a * (3 - 2 * a)
-        var forward = simd_normalize(entryForward + (axis - entryForward) * eased)
-        if simd_length_squared(forward) < 1e-6 { forward = axis }
-
+    private func applyDiveCamera(dt: Float) {
+        guard camera.holeRs > 0, let ch = diveChannel, ch.start != nil else {
+            diveActive = false
+            return
+        }
         let rs = camera.holeRs
-        let startRs = simd_distance(entryEye, camera.holePos) / max(rs, 1e-4)
-        let eye = camera.holePos - axis * (DiveTimeline.holdDistanceRs(at: p, from: startRs) * rs)
+        if !diveActive {
+            // Seamless handoff: continue from exactly where free flight was, the
+            // way it was moving — no repositioning, no aim cut.
+            diveActive = true
+            divePos = ch.entryEye
+            diveVel = ch.entryVelocity
+            let maxEntry = DivePhysics.maxEntrySpeedRsPerS * rs
+            if simd_length(diveVel) > maxEntry { diveVel = simd_normalize(diveVel) * maxEntry }
+            diveForward = ch.entryForward
+            diveRoll = 0
+            diveNarrativeR = simd_distance(ch.entryEye, camera.holePos) / rs
+        }
+
+        var toHole = camera.holePos - divePos
+        var r = simd_length(toHole) / rs
+        let inward = r > 1e-4 ? simd_normalize(toHole) : SIMD3<Float>(0, 0, 1)
+
+        if diveNarrativeR > 1, r > 1 {
+            // Gravity owns the fall; the entry velocity just seasons the approach.
+            diveVel += inward * (DivePhysics.gravity / max(r * r, 0.2)) * rs * dt
+            let maxFall = DivePhysics.maxFallSpeedRsPerS * rs
+            if simd_length(diveVel) > maxFall { diveVel = simd_normalize(diveVel) * maxFall }
+            divePos += diveVel * dt
+            toHole = camera.holePos - divePos
+            r = simd_length(toHole) / rs
+            diveNarrativeR = r
+        } else {
+            // Inside (once crossed, forever): nothing outside the horizon is
+            // renderable from within (every ray terminates), so the render radius
+            // holds just outside while the narrative radius runs down the real
+            // ~12.8 s to the singularity.
+            diveNarrativeR = max(DivePhysics.endRadiusRs,
+                                 min(diveNarrativeR, 1) - DivePhysics.interiorRateRsPerS * dt)
+            divePos = camera.holePos - inward * (1.02 * rs)
+            diveVel = inward * (0.05 * rs)   // a crawl, so the view stays gently alive
+        }
+        ch.currentRRs = Double(diveNarrativeR)
+        if diveNarrativeR <= DivePhysics.endRadiusRs + 0.001 { ch.finished = true }
+
+        // Look where you're falling (eased), with a slow speed-scaled roll.
+        let vDir = simd_length(diveVel) > 1e-6 ? simd_normalize(diveVel) : inward
+        let ease = min(1, dt / 1.2)
+        var forward = diveForward + (vDir - diveForward) * ease
+        forward = simd_length_squared(forward) < 1e-8 ? inward : simd_normalize(forward)
+        diveForward = forward
+
+        let beta = Float(DivePhysics.beta(atRs: Double(max(r, 1))))
+        if !ch.reduceMotion { diveRoll += (0.03 + 0.12 * beta) * dt }
+
+        camera.dive = DivePhysics.stage(atRs: Double(diveNarrativeR), reduceMotion: ch.reduceMotion)
 
         var side = simd_cross(forward, SIMD3<Float>(0, 1, 0))
         side = simd_length(side) < 1e-4 ? SIMD3(1, 0, 0) : simd_normalize(side)
         var up = simd_cross(side, forward)
-
-        // Accelerating roll around the infall axis — the vertigo of the spiral fall.
-        let roll = DiveTimeline.rollAngle(at: p)
-        if roll != 0 {
-            let c = cos(roll), s = sin(roll)
+        if diveRoll != 0 {
+            let c = cos(diveRoll), s = sin(diveRoll)
             let rolledSide = side * c + simd_cross(forward, side) * s
             let rolledUp = up * c + simd_cross(forward, up) * s
             side = simd_normalize(rolledSide)
@@ -434,12 +461,9 @@ final class GalaxyMetalRenderer: NSObject {
             SIMD4(side.z, up.z, -f.z, 0),
             SIMD4(0, 0, 0, 1)
         ))
-        // FOV widens mid-plunge (speed rush). The lens pass builds rays from
-        // tanHalfW/H, so those must track the same field of view.
-        let fov = camera.fovY * DiveTimeline.fovBoost(at: p)
-        camera.tanHalfH = tan(fov * 0.5)
+        camera.tanHalfH = tan(camera.fovY * 0.5)
         camera.tanHalfW = camera.tanHalfH * max(camera.aspect, 1e-4)
-        let yScale = 1 / tan(fov * 0.5)
+        let yScale = 1 / tan(camera.fovY * 0.5)
         let xScale = yScale / max(camera.aspect, 1e-4)
         let zScale: Float = 200000 / (0.05 - 200000)
         let projection = simd_float4x4(columns: (
@@ -449,13 +473,17 @@ final class GalaxyMetalRenderer: NSObject {
             SIMD4(0, 0, zScale * 0.05, 0)
         ))
         camera.viewProj = projection * view
-        camera.eye = eye
+        // The pose floors at the visualization radius (DivePhysics.renderFloorRs);
+        // the fall and the narrative continue beneath it.
+        let renderR = max(diveNarrativeR, DivePhysics.renderFloorRs)
+        let renderPos = camera.holePos - inward * (renderR * rs)
+        camera.eye = renderPos
         camera.forward = forward
         camera.right = side
         camera.up = up
 
         uniforms.viewProj = camera.viewProj
-        uniforms.ex = eye.x; uniforms.ey = eye.y; uniforms.ez = eye.z
+        uniforms.ex = renderPos.x; uniforms.ey = renderPos.y; uniforms.ez = renderPos.z
     }
 
     private func makeLensUniforms() -> LensUniforms {
@@ -549,19 +577,15 @@ final class GalaxyMetalRenderer: NSObject {
         let now = CACurrentMediaTime()
         let dt = min(0.1, now - lastFrameTime)
         lastFrameTime = now
-        var warp = 1.0
-        if let start = diveChannel?.start ?? camera.diveStart {
-            warp = DiveTimeline.timeWarp(at: min(1, Date().timeIntervalSince(start) / DiveTimeline.duration))
-        }
-        warpedTime += dt * warp
+        applyDiveCamera(dt: Float(dt))
+        warpedTime += dt * (diveActive ? DivePhysics.timeWarp(atRs: Double(diveNarrativeR)) : 1)
 
-        applyDiveCamera()
         bakeSkyIfNeeded(cb)
         // Near the hole many/all pixels are ray-marched, so scene + lens render into
         // internal textures at a budgeted pixel size and a final blit upscales to the
         // native drawable. All internal: the MTKView/layer never change scale (doing
         // that mid-flight corrupts SwiftUI's update graph and wedges the window).
-        let diving = (diveChannel?.start ?? camera.diveStart) != nil
+        let diving = diveActive
         let moved = lastPose.map {
             simd_distance($0.eye, camera.eye) > camera.holeRs * 0.002 + 1e-5 ||
             simd_dot($0.fwd, camera.forward) < 0.999995
@@ -637,11 +661,10 @@ final class GalaxyMetalRenderer: NSObject {
                 enc.endEncoding()
             }
 
-            if dumpFrames, reduced, let start = diveChannel?.start ?? camera.diveStart, let lensOut,
+            if dumpFrames, reduced, diveActive, let lensOut,
                CACurrentMediaTime() - lastDump > 2.5 {
                 lastDump = CACurrentMediaTime()
-                let p = min(1, Date().timeIntervalSince(start) / DiveTimeline.duration)
-                let tag = String(format: "p%03d", Int(p * 100))
+                let tag = String(format: "r%04.1f", diveNarrativeR)   // radius in rs
                 cb.addCompletedHandler { _ in Self.writeDump(lensOut, tag: tag) }
             }
         } else {

@@ -61,7 +61,7 @@ struct GalaxyMapView: View {
     // hands the camera to `DiveTimeline` for one staged, time-anchored plunge
     // (BlackHoleDive.swift), rendered by the same in-map lensing pass.
     @State private var diveStart: Date?
-    @State private var diveProgress: Double = 0
+    @State private var diveRRs: Double = .infinity   // narrative radius (rs) for the HUD
     @State private var diveEntry: (eye: SIMD3<Float>, yaw: Float, pitch: Float)?
     @State private var showDiveEpilogue = false
     @State private var diveChannel = DiveChannel()   // imperative handoff to the renderer
@@ -115,7 +115,7 @@ struct GalaxyMapView: View {
                     metalAnnotations(size: size, viewProjection: viewProjection)
                     overlay(size: size, viewProjection: viewProjection, safe: .deviceSafeArea)
                 } else {
-                    DiveHUD(progress: diveProgress) { endDive() }
+                    DiveHUD(rRs: diveRRs) { endDive() }
                 }
                 if showDiveEpilogue {
                     DiveEpilogue()
@@ -477,19 +477,8 @@ struct GalaxyMapView: View {
                 camera.forward = f
                 camera.tanHalfH = tan(fieldOfView / 2)
                 camera.tanHalfW = camera.tanHalfH * aspect
-                if let diveStart, let entry = diveEntry {
-                    // The renderer owns the dive camera (display-link smooth, no
-                    // 60 Hz @State churn) — hand it the entry pose and the clock.
-                    camera.diveStart = diveStart
-                    camera.diveEntryEye = entry.eye
-                    let look = SIMD3<Float>(cos(entry.pitch) * sin(entry.yaw),
-                                            sin(entry.pitch),
-                                            cos(entry.pitch) * cos(entry.yaw))
-                    camera.diveEntryForward = -look
-                    camera.diveReduceMotion = reduceMotion
-                    camera.fovY = fieldOfView
-                    camera.aspect = aspect
-                }
+                camera.fovY = fieldOfView   // the renderer rebuilds projection mid-dive
+                camera.aspect = aspect
             }
         }
         return camera
@@ -847,8 +836,10 @@ struct GalaxyMapView: View {
                 // glows from across the galaxy (the lens pass engages as its influence
                 // region reaches pixel size; the beacon's light then lenses too).
                 if lm.id == "sgr-a" {
-                    gas(center, physR * 3.2, SIMD4(1.0, 0.72, 0.40, 1), 0.08, 1)
-                    gas(center, physR * 1.4, SIMD4(1.0, 0.90, 0.72, 1), 0.14, 1)
+                    // Kept faint: up close this glow is fog over the NASA-dark sky
+                    // the lens pass wants; it only needs to mark the spot from afar.
+                    gas(center, physR * 2.4, SIMD4(1.0, 0.72, 0.40, 1), 0.05, 1)
+                    gas(center, physR * 1.2, SIMD4(1.0, 0.90, 0.72, 1), 0.10, 1)
                     continue
                 }
                 // Microquasars keep the sprite model. Proportions follow Schwarzschild
@@ -980,7 +971,7 @@ struct GalaxyMapView: View {
                     let speed = (throttle < 0 ? -1 : 1) * throttle * throttle * flySpeed
                     let previous = eye
                     eye += (-lookDirection) * (speed * dt)
-                    checkDiveTrigger(from: previous, to: eye)
+                    checkDiveTrigger(from: previous, to: eye, dt: dt)
                 }
                 try? await Task.sleep(for: .milliseconds(16))
             }
@@ -1008,20 +999,21 @@ struct GalaxyMapView: View {
         return simd_distance(point, a + ab * t)
     }
 
-    /// Free-flying from outside across ~12 rs of Sgr A* commits you to the plunge —
-    /// far enough out that the dive is a genuine fall (the shadow grows the whole way).
-    private func checkDiveTrigger(from previous: SIMD3<Float>, to current: SIMD3<Float>) {
+    /// Free flight crossing the point of no return (~6 rs) belongs to gravity: the
+    /// renderer integrates a free-fall from the actual position and velocity — no
+    /// repositioning, no cinematic camera. You fall the way you were flying.
+    private func checkDiveTrigger(from previous: SIMD3<Float>, to current: SIMD3<Float>, dt: Float) {
         guard diveStart == nil, let hole = Self.sgrA else { return }
-        let triggerR = Float(hole.radiusParsecs) * 12
+        let triggerR = Float(hole.radiusParsecs) * DivePhysics.captureRadiusRs
         guard simd_distance(previous, hole.positionParsecs) > triggerR,
               segmentDistance(previous, current, to: hole.positionParsecs) <= triggerR else { return }
-        startDive()
+        startDive(velocity: dt > 1e-4 ? (current - previous) / dt : .zero)
     }
 
-    private func startDive() {
+    private func startDive(velocity: SIMD3<Float>) {
         guard Self.sgrA != nil else { return }
-        diveEntry = (eye, yaw, pitch)   // the renderer derives the infall axis from this pose
-        diveProgress = 0
+        diveEntry = (eye, yaw, pitch)
+        diveRRs = Double(DivePhysics.captureRadiusRs)
         diveStart = Date()
         showDiveEpilogue = false
         throttle = 0
@@ -1031,19 +1023,23 @@ struct GalaxyMapView: View {
         // Hand the dive to the renderer directly — it must run even if SwiftUI
         // never renders again until it's over.
         diveChannel.entryEye = eye
+        diveChannel.entryVelocity = velocity
         diveChannel.entryForward = -lookDirection
         diveChannel.reduceMotion = reduceMotion
+        diveChannel.currentRRs = Double(DivePhysics.captureRadiusRs)
+        diveChannel.finished = false
         diveChannel.start = diveStart
     }
 
-    /// Narration tick while diving. The renderer computes the actual 60 fps camera
-    /// from the wall clock (`applyDiveCamera`); SwiftUI only needs coarse progress
-    /// for the HUD copy — high-rate @State churn here starves SwiftUI rendering.
+    /// Narration tick while diving. The renderer integrates the actual fall
+    /// (`applyDiveCamera`) and reports the radius back through the channel; SwiftUI
+    /// only needs it at a few Hz for the HUD copy.
     private func advanceDive(_ now: Date) {
         guard let start = diveStart else { return }
-        let p = min(1, now.timeIntervalSince(start) / DiveTimeline.duration)
-        diveProgress = (p * 120).rounded() / 120   // ~0.25 s steps for the countdown
-        if p >= 1 { endDive() }
+        diveRRs = (diveChannel.currentRRs * 20).rounded() / 20
+        if diveChannel.finished || now.timeIntervalSince(start) > DivePhysics.failsafeSeconds {
+            endDive()
+        }
     }
 
     /// Ends (or skips) the dive: nothing escapes, so the simulation rewinds — back
@@ -1052,14 +1048,14 @@ struct GalaxyMapView: View {
         guard diveStart != nil, let hole = Self.sgrA else { return }
         diveStart = nil
         diveChannel.start = nil
-        diveProgress = 0
+        diveRRs = .infinity
         flyTask?.cancel()
         flyMode = false
         throttle = 0
         throttling = false
         let rs = Float(hole.radiusParsecs)
         target = hole.positionParsecs
-        distance = rs * 13   // just outside the trigger — literally "the moment before you crossed"
+        distance = rs * 8   // just outside the point of no return — "the moment before"
         zoomAnchor = distance
         if let entry = diveEntry {
             let back = simd_normalize(entry.eye - hole.positionParsecs)
@@ -1120,7 +1116,7 @@ struct GalaxyMapView: View {
             // `-close` parks in the heaviest band (just outside the influence radius,
             // the march covering the whole frame) for perf verification.
             let close = ProcessInfo.processInfo.arguments.contains("-close")
-            distance = dive ? Float(hole.radiusParsecs) * 16 : (close ? 24 : 70)
+            distance = dive ? Float(hole.radiusParsecs) * 10 : (close ? 24 : 70)
             zoomAnchor = distance
             if dive {
                 enterFlyMode()

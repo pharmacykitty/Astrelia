@@ -7,8 +7,9 @@
 >
 > ✅ **REBUILT & IN THE APP (2026-07-02) — verified on simulator, frame-by-frame.**
 > (The 2026-07-01 build was removed, then rebuilt from this doc the next day as the
-> **easter egg**: free-fly across ~12 rs of Sgr A\* and the plunge takes over. No button,
-> no card action — you have to fly in.) Current architecture:
+> **easter egg**: free-fly across ~6 rs of Sgr A\* — the point of no return — and gravity
+> takes over. No button, no card action, no cinematic camera: the fall is SIMULATED from
+> your actual position and velocity.) Current architecture:
 >
 > - **In-map lensing, always on** — `App/Screens/Galaxy/GalaxyLensing.metal` +
 >   `GalaxyMetalRenderer`. The sprite scene renders to an offscreen colour+depth target;
@@ -40,29 +41,27 @@
 >   route has no UIKit side effects. Far from the hole the lens pass is engaged only
 >   while its influence region spans ≥ ~a pixel (else the sprite path renders straight
 >   to the drawable, zero overhead).
-> - **The dive is renderer-owned** — `DiveChannel` (imperative box) hands the fly-loop's
->   trigger to the renderer; `applyDiveCamera()` recomputes pose + `DiveStage` uniforms
->   per display-link frame as **pure functions of wall-clock time** (`DiveTimeline` in
->   `BlackHoleDive.swift`). SwiftUI only narrates (HUD at ~4 Hz). This matters twice: the
->   60 Hz @State camera churn can wedge SwiftUI entirely (observed on simulator), and the
->   dive must not depend on a SwiftUI render to start or advance. Time-anchored progress
->   (stalls can't speed the fall), ~30 s total.
-> - **Beats** (`DiveTimeline.stage`): β 0.19→0.992 with **inverse relativistic aberration**
->   (screen ray → rest-frame ray, negative β — the forward map blacks the frame out; the
->   inverse shrinks the shadow while the sky crowds bright around it) + Doppler headlight;
->   equirect `bakeMix` ramps in before heavy aberration; the camera genuinely falls,
->   **11.5 → 7.0 rs** (the shadow grows the whole way; in portrait it spans the screen
->   inside ~8 rs and inverse aberration holds it at bay), with an accelerating roll,
->   a widening FOV, and warped disc-swirl time (the outside universe fast-forwards ~5×);
->   `aperture` collapses the outside universe after the crossing (p = 0.60); `spaghetti`
->   radial stretch + global redshift inside; white flash → **eject**: the camera rewinds to
->   an orbit outside, facing the hole, with an epilogue caption ("Nothing that enters ever
->   leaves — the simulation has been rewound."). A β-gated **soft tone-map knee** keeps the
->   photon ring white-hot while the stacked boosts roll off filmically. Reduce Motion
->   softens aberration + stretch. HUD: speed %c, real-km distance, time-dilation ×, and the
->   12.8 s countdown; Skip button always present.
+> - **The dive is a SIMULATION the renderer integrates** (`DivePhysics` in
+>   `BlackHoleDive.swift`): crossing ~6 rs in free flight hands your actual position and
+>   velocity to `DiveChannel`; `applyDiveCamera(dt:)` integrates a Newtonian-styled pull
+>   per display-link frame (entry speed clamped so a hot approach can't skip the show; the
+>   fall from 6 rs takes ~5–9 s). No repositioning, no aim cut — you fall the way you flew,
+>   the view easing toward the velocity direction with a slow β-scaled roll. Every effect
+>   is a function of the radius: **β = √(rs/r)** (the real free-fall law) drives inverse
+>   relativistic aberration (0.5×β) + the Doppler headlight; the disc-swirl clock
+>   fast-forwards with β² (accumulated, no phase pops); the disc flares as a **photon
+>   pile-up blaze at the crossing**; inside, redshift/spaghetti run the narrative radius
+>   down Sgr A\*'s real **12.8 s** to the singularity, the last light dying to true black
+>   before the flash → **rewind**: an orbit just outside the trigger (8 rs), facing the
+>   hole, with the epilogue caption. SwiftUI only narrates (HUD at a few Hz from the
+>   channel's radius: %c, real km, dilation ×, the countdown; Skip always present) — the
+>   dive must not depend on a SwiftUI render (60 Hz @State churn can wedge it, observed on
+>   simulator). **Visualization floor:** the camera pose holds at ~4.5 rs
+>   (`renderFloorRs`) while the narrative keeps falling — inside that, the whole forward
+>   view lies within the shadow (the escape cone points backward): physically true, but a
+>   black screen. Reduce Motion softens aberration, stretch, and roll.
 > - **Debug**: `-galaxyBH` opens the map at Sgr A\* (70 pc); `-close` parks at 24 pc
->   (the heaviest march band); `-galaxyBH -dive` spawns free-fly at 16 rs inbound so the
+>   (the heaviest march band); `-galaxyBH -dive` spawns free-fly at 10 rs inbound so the
 >   trigger fires; `-fpsLog` prints frame rate + lens scale every ~2 s; `-dumpDive`
 >   writes the lens output to Documents every 2.5 s (the GPU's ground truth — sim
 >   chrome can wedge mid-dive while the Metal layer plays on). **Always smoke-test new

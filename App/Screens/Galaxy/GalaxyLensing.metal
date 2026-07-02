@@ -99,8 +99,8 @@ static float4 bh_disc(float3 xp, float3 n, float rd, float rIn, float rOut,
     // Wide dynamic range: the banding carves real gaps (sky shows through between
     // filaments) instead of stacking into a featureless fog.
     float omega = betaD / rd;                              // angular rate ∝ r^-1.5
-    float band  = bh_noise(float2(phi * 2.6 - time * omega * 42.0, rd * 2.3));
-    float band2 = bh_noise(float2(phi * 6.5 - time * omega * 60.0 + 17.3, rd * 5.7));
+    float band  = bh_noise(float2(phi * 3.6 - time * omega * 42.0, rd * 3.0));
+    float band2 = bh_noise(float2(phi * 8.0 - time * omega * 60.0 + 17.3, rd * 7.0));
     float texture = 0.30 + 0.85 * band + 0.35 * band2;
 
     float radial = pow(rIn / rd, 2.2);                     // emissivity falls off outward
@@ -169,10 +169,10 @@ fragment float4 lens_fragment(LensVSOut in [[stage_in]],
     float3 dir = normalize(fwd + right * (ndc.x * u.tanHalfW) + up * (ndc.y * u.tanHalfH));
     // Relativistic aberration, INVERSE map: for each screen direction in the
     // infalling frame, find the rest-frame ray it came from (negative β). The sky
-    // crowds bright toward the travel axis and the shadow shrinks. Kept at 0.4×β:
-    // at full strength the shrink outruns the camera's fall and the hole appears
-    // to RECEDE mid-plunge — engulfment must win the tug-of-war.
-    if (u.beta > 0.001) dir = bh_aberrate(dir, fwd, -u.beta * 0.4);
+    // crowds bright toward the travel axis and the shadow shrinks. 0.5×β: real
+    // geometry (the camera truly falls to r → rs) now provides the engulfment, so
+    // the aberration can be stronger without the hole appearing to recede.
+    if (u.beta > 0.001) dir = bh_aberrate(dir, fwd, -u.beta * 0.5);
 
     float dAlong = dot(hp, dir);
     float3 cvec = dir * max(dAlong, 0.0) - hp;             // hole → closest approach
@@ -254,9 +254,11 @@ fragment float4 lens_fragment(LensVSOut in [[stage_in]],
             float3 n = normalize(float3(u.dnx, u.dny, u.dnz));
             float planeDist = dot(outDir, n);
             float band = exp(-planeDist * planeDist * 5.0);
-            // Fades as the plunge accelerates: the streaking stars and the disc
-            // carry the drama; a bright ambient would white the whole frame out.
-            float calm = 1.0 - 0.8 * saturate(u.beta / 0.7);
+            // Fades with speed AND proximity: near the hole the sky should be
+            // NASA-dark (stars + disc only), not a warm fog — the ambient exists
+            // to blend the far view with the on-screen bulge haze.
+            float calm = (1.0 - 0.8 * saturate(u.beta / 0.7))
+                       * saturate((length(hp) / u.rs - 5.0) / 15.0);
             float3 bulge = float3(1.0, 0.82, 0.55) * (0.30 * band + 0.05) * calm;
             b.rgb += bulge;
             b.a = max(b.a, (0.75 * band + 0.18) * calm);
