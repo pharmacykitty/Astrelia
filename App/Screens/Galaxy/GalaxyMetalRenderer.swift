@@ -383,6 +383,7 @@ final class GalaxyMetalRenderer: NSObject {
     private var diveVel = SIMD3<Float>(0, 0, 0)
     private var diveForward = SIMD3<Float>(0, 0, -1)
     private var diveRoll: Float = 0
+    private var diveTilt = SIMD3<Float>(0, 0, 0)          // composition: hole off-axis, disc in frame
     private(set) var diveNarrativeR: Float = .infinity   // rs units
 
     private func applyDiveCamera(dt: Float) {
@@ -402,6 +403,15 @@ final class GalaxyMetalRenderer: NSObject {
             diveForward = ch.entryForward
             diveRoll = 0
             diveNarrativeR = simd_distance(ch.entryEye, camera.holePos) / rs
+            // In portrait, a dead-centre shadow outgrows the screen and the fall
+            // shows nothing but black. Tilt the composition toward the disc plane
+            // (whichever side we're on) so the shadow's fiery boundary and the
+            // disc sweep stay in frame — the NASA-shot framing.
+            let n = simd_normalize(camera.diskNormal)
+            let side: Float = simd_dot(ch.entryEye - camera.holePos, n) >= 0 ? 1 : -1
+            // ~37° off-axis: the apparent shadow radius mid-fall is ~35°, so the
+            // boundary fire crosses mid-frame instead of hugging the edge.
+            diveTilt = -n * side * 0.75
         }
 
         var toHole = camera.holePos - divePos
@@ -430,10 +440,13 @@ final class GalaxyMetalRenderer: NSObject {
         ch.currentRRs = Double(diveNarrativeR)
         if diveNarrativeR <= DivePhysics.endRadiusRs + 0.001 { ch.finished = true }
 
-        // Look where you're falling (eased), with a slow speed-scaled roll.
+        // Look where you're falling (eased), drifting toward the disc-plane
+        // composition as the fall deepens, with a slow speed-scaled roll.
         let vDir = simd_length(diveVel) > 1e-6 ? simd_normalize(diveVel) : inward
+        let tiltRamp = max(0, min(1, (6 - diveNarrativeR) / 2.5))
+        let aim = simd_normalize(vDir + diveTilt * tiltRamp)
         let ease = min(1, dt / 1.2)
-        var forward = diveForward + (vDir - diveForward) * ease
+        var forward = diveForward + (aim - diveForward) * ease
         forward = simd_length_squared(forward) < 1e-8 ? inward : simd_normalize(forward)
         diveForward = forward
 
@@ -461,9 +474,12 @@ final class GalaxyMetalRenderer: NSObject {
             SIMD4(side.z, up.z, -f.z, 0),
             SIMD4(0, 0, 0, 1)
         ))
-        camera.tanHalfH = tan(camera.fovY * 0.5)
+        // Speed-scaled FOV widen: more of the ring fits the narrow portrait frame
+        // as the fall deepens.
+        let fov = camera.fovY * (1 + 0.35 * beta * (ch.reduceMotion ? 0.5 : 1))
+        camera.tanHalfH = tan(fov * 0.5)
         camera.tanHalfW = camera.tanHalfH * max(camera.aspect, 1e-4)
-        let yScale = 1 / tan(camera.fovY * 0.5)
+        let yScale = 1 / tan(fov * 0.5)
         let xScale = yScale / max(camera.aspect, 1e-4)
         let zScale: Float = 200000 / (0.05 - 200000)
         let projection = simd_float4x4(columns: (
