@@ -383,6 +383,7 @@ final class GalaxyMetalRenderer: NSObject {
     private var diveVel = SIMD3<Float>(0, 0, 0)
     private var diveForward = SIMD3<Float>(0, 0, -1)
     private var diveRoll: Float = 0
+    private var diveOrbit: Float = 0                      // spiral angle — infall has angular momentum
     private var diveTilt = SIMD3<Float>(0, 0, 0)          // composition: hole off-axis, disc in frame
     private(set) var diveNarrativeR: Float = .infinity   // rs units
 
@@ -402,6 +403,7 @@ final class GalaxyMetalRenderer: NSObject {
             if simd_length(diveVel) > maxEntry { diveVel = simd_normalize(diveVel) * maxEntry }
             diveForward = ch.entryForward
             diveRoll = 0
+            diveOrbit = 0
             diveNarrativeR = simd_distance(ch.entryEye, camera.holePos) / rs
             // In portrait, a dead-centre shadow outgrows the screen and the fall
             // shows nothing but black. Tilt the composition toward the disc plane
@@ -441,17 +443,31 @@ final class GalaxyMetalRenderer: NSObject {
         ch.currentRRs = Double(diveNarrativeR)
         if diveNarrativeR <= DivePhysics.endRadiusRs + 0.001 { ch.finished = true }
 
+        // Infall has angular momentum: the render pose spirals around the hole
+        // (circling the drain, faster with β), so the disc and ring stream past
+        // continuously instead of the view freezing at the render floor.
+        let beta = Float(DivePhysics.beta(atRs: Double(max(r, 1))))
+        let motionScale: Float = ch.reduceMotion ? 0.35 : 1
+        diveOrbit += (0.10 + 0.45 * beta) * dt * motionScale
+
+        let axisN = simd_normalize(camera.diskNormal)
+        let renderR = max(diveNarrativeR, DivePhysics.renderFloorRs)
+        let radial0 = -inward
+        let cosO = cos(diveOrbit), sinO = sin(diveOrbit)
+        let radial = radial0 * cosO + simd_cross(axisN, radial0) * sinO
+                   + axisN * simd_dot(axisN, radial0) * (1 - cosO)
+        let renderPos = camera.holePos + simd_normalize(radial) * (renderR * rs)
+        let inwardR = simd_normalize(camera.holePos - renderPos)
+
         // Look where you're falling (eased), drifting toward the disc-plane
         // composition as the fall deepens, with a slow speed-scaled roll.
-        let vDir = simd_length(diveVel) > 1e-6 ? simd_normalize(diveVel) : inward
         let tiltRamp = max(0, min(1, (6 - diveNarrativeR) / 2.5))
-        let aim = simd_normalize(vDir + diveTilt * tiltRamp)
+        let aim = simd_normalize(inwardR + diveTilt * tiltRamp)
         let ease = min(1, dt / 1.2)
         var forward = diveForward + (aim - diveForward) * ease
-        forward = simd_length_squared(forward) < 1e-8 ? inward : simd_normalize(forward)
+        forward = simd_length_squared(forward) < 1e-8 ? inwardR : simd_normalize(forward)
         diveForward = forward
 
-        let beta = Float(DivePhysics.beta(atRs: Double(max(r, 1))))
         if !ch.reduceMotion { diveRoll += (0.03 + 0.12 * beta) * dt }
 
         camera.dive = DivePhysics.stage(atRs: Double(diveNarrativeR), reduceMotion: ch.reduceMotion)
@@ -490,10 +506,8 @@ final class GalaxyMetalRenderer: NSObject {
             SIMD4(0, 0, zScale * 0.05, 0)
         ))
         camera.viewProj = projection * view
-        // The pose floors at the visualization radius (DivePhysics.renderFloorRs);
-        // the fall and the narrative continue beneath it.
-        let renderR = max(diveNarrativeR, DivePhysics.renderFloorRs)
-        let renderPos = camera.holePos - inward * (renderR * rs)
+        // The pose floors at the visualization radius and rides the spiral; the
+        // fall and the narrative continue beneath it.
         camera.eye = renderPos
         camera.forward = forward
         camera.right = side
@@ -541,11 +555,12 @@ final class GalaxyMetalRenderer: NSObject {
         rpd.colorAttachments[0].storeAction = .store
         rpd.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
         guard let enc = cb.makeRenderCommandEncoder(descriptor: rpd) else { return }
-        // The skip radius must swallow the hole's own beacon AND the nucleus-glow
-        // art (~10 pc out): baked, those wash half the panorama cream, and the
-        // lensed sky should be NASA-black — stars and the Milky Way band only.
+        // Skip only the hole's own beacon. The nucleus glow STAYS in the panorama:
+        // the lensed sky must match the warm haze the screen shows around it, or
+        // the strongly-bent sectors read as alien dark bubbles. The dive darkens
+        // the sky later via the interior aperture fade instead.
         var bu = BakeUniforms(hx: camera.holePos.x, hy: camera.holePos.y, hz: camera.holePos.z,
-                              skipRadius: max(camera.holeRs * 2.5, 12),
+                              skipRadius: camera.holeRs * 2.5,
                               texW: 2048, texH: 1024, pad0: 0, pad1: 0)
         enc.setRenderPipelineState(bakePipeline)
         for (buffer, count) in [(additiveBuffer, additiveCount), (landmarkBuffer, landmarkCount)] {

@@ -77,8 +77,10 @@ enum DivePhysics {
         // Kept restrained: NASA's rings are thin orange circles, not a white blaze.
         let flare = exp(-pow((r - 1.05) / 0.3, 2))
         s.discBoost = Float(0.35 * clamp01((10 - r) / 6) + 0.7 * flare)
-        // Inside: the last light reddens, stretches, and dies on the way down.
+        // Inside: the outside universe's light dies — the warm lensed sky fades
+        // (aperture), everything reddens, stretches, and goes to black.
         let inside = clamp01((1 - r) / Double(1 - endRadiusRs))
+        s.aperture = Float(0.85 * clamp01(inside / 0.55))
         s.redshift = Float(pow(inside, 0.8))
         s.spaghetti = Float(clamp01((inside - 0.15) / 0.6)) * motion
         s.flash = Float(clamp01((Double(endRadiusRs) + 0.09 - r) / 0.09))

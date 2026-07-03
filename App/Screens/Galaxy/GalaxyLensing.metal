@@ -58,6 +58,20 @@ static float bh_noise(float2 p) {
                mix(bh_hash(i + float2(0, 1)),     bh_hash(i + float2(1, 1)), s.x), s.y);
 }
 
+// Value noise periodic in x (period = whole number of lattice cells): for the
+// disc's azimuthal gas bands, so the swirl connects seamlessly across ±π
+// instead of leaving a radial seam.
+static float bh_pnoise(float x, float period, float y) {
+    float xi = floor(x), xf = x - xi;
+    float yi = floor(y), yf = y - yi;
+    float i0 = fmod(fmod(xi, period) + period, period);
+    float i1 = fmod(i0 + 1.0, period);
+    float sx = xf * xf * (3.0 - 2.0 * xf);
+    float sy = yf * yf * (3.0 - 2.0 * yf);
+    return mix(mix(bh_hash(float2(i0, yi)),       bh_hash(float2(i1, yi)), sx),
+               mix(bh_hash(float2(i0, yi + 1.0)), bh_hash(float2(i1, yi + 1.0)), sx), sy);
+}
+
 // Relativistic aberration: as β→1 the whole sky crowds toward the travel axis.
 static float3 bh_aberrate(float3 d, float3 axis, float beta) {
     float c = dot(d, axis);
@@ -99,10 +113,12 @@ static float4 bh_disc(float3 xp, float3 n, float rd, float rIn, float rOut,
 
     // Gas bands swirling at the (differential) Keplerian rate — inner laps outer.
     // Wide dynamic range: the banding carves real gaps (sky shows through between
-    // filaments) instead of stacking into a featureless fog.
+    // filaments) instead of stacking into a featureless fog. Periodic in φ so the
+    // pattern connects seamlessly across ±π (no radial seam).
     float omega = betaD / rd;                              // angular rate ∝ r^-1.5
-    float band  = bh_noise(float2(phi * 3.6 - time * omega * 42.0, rd * 3.0));
-    float band2 = bh_noise(float2(phi * 8.0 - time * omega * 60.0 + 17.3, rd * 7.0));
+    float phi01 = phi / (2.0 * M_PI_F) + 0.5;
+    float band  = bh_pnoise(phi01 * 4.0 - time * omega * 6.7, 4.0, rd * 3.0);
+    float band2 = bh_pnoise(phi01 * 8.0 - time * omega * 9.5 + 17.3, 8.0, rd * 7.0);
     float texture = 0.30 + 0.85 * band + 0.35 * band2;
 
     float radial = pow(rIn / rd, 2.2);                     // emissivity falls off outward
@@ -255,7 +271,9 @@ fragment float4 lens_fragment(LensVSOut in [[stage_in]],
         float bent = saturate((1.0 - dot(outDir, dir)) * 400.0);
         float bakeW = max((1.0 - screenW) * bent, u.bakeMix);
         if (bakeW > 0.001) {
-            float4 b = skyTex.sample(smp, bh_equirect(outDir));
+            // Wrap longitude so rays crossing the panorama's ±π seam stay continuous.
+            constexpr sampler wrapSmp(s_address::repeat, t_address::clamp_to_edge, filter::linear);
+            float4 b = skyTex.sample(wrapSmp, bh_equirect(outDir));
             // The bake resolves individual stars but under-samples the soft bulge
             // wash (its sprites shrink to true angular size); add the nucleus glow
             // procedurally — a warm band hugging the galactic plane — so strongly
