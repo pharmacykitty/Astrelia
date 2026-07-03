@@ -74,8 +74,9 @@ enum DivePhysics {
         s.beta = Float(beta(atRs: max(r, 1))) * motion       // β holds its horizon value inside
         s.bakeMix = Float(clamp01((14 - r) / 6))             // whole-sky bake well before the plunge deepens
         // Disc flares with proximity, blazing right at the horizon (photon pile-up).
+        // Kept restrained: NASA's rings are thin orange circles, not a white blaze.
         let flare = exp(-pow((r - 1.05) / 0.3, 2))
-        s.discBoost = Float(0.35 * clamp01((10 - r) / 6) + 1.1 * flare)
+        s.discBoost = Float(0.35 * clamp01((10 - r) / 6) + 0.7 * flare)
         // Inside: the last light reddens, stretches, and dies on the way down.
         let inside = clamp01((1 - r) / Double(1 - endRadiusRs))
         s.redshift = Float(pow(inside, 0.8))

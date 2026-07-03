@@ -409,9 +409,10 @@ final class GalaxyMetalRenderer: NSObject {
             // disc sweep stay in frame — the NASA-shot framing.
             let n = simd_normalize(camera.diskNormal)
             let side: Float = simd_dot(ch.entryEye - camera.holePos, n) >= 0 ? 1 : -1
-            // ~37° off-axis: the apparent shadow radius mid-fall is ~35°, so the
-            // boundary fire crosses mid-frame instead of hugging the edge.
-            diveTilt = -n * side * 0.75
+            // Tilt AWAY from the disc plane (NASA-mound framing): the hole and its
+            // fiery boundary sit low in frame while the upper frame opens to black
+            // sky, stars, and the lensed Milky Way band — the universe warping.
+            diveTilt = n * side * 0.55
         }
 
         var toHole = camera.holePos - divePos
@@ -540,8 +541,11 @@ final class GalaxyMetalRenderer: NSObject {
         rpd.colorAttachments[0].storeAction = .store
         rpd.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
         guard let enc = cb.makeRenderCommandEncoder(descriptor: rpd) else { return }
+        // The skip radius must swallow the hole's own beacon AND the nucleus-glow
+        // art (~10 pc out): baked, those wash half the panorama cream, and the
+        // lensed sky should be NASA-black — stars and the Milky Way band only.
         var bu = BakeUniforms(hx: camera.holePos.x, hy: camera.holePos.y, hz: camera.holePos.z,
-                              skipRadius: camera.holeRs * 2.5,
+                              skipRadius: max(camera.holeRs * 2.5, 12),
                               texW: 2048, texH: 1024, pad0: 0, pad1: 0)
         enc.setRenderPipelineState(bakePipeline)
         for (buffer, count) in [(additiveBuffer, additiveCount), (landmarkBuffer, landmarkCount)] {

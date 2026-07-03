@@ -89,11 +89,13 @@ static float4 bh_disc(float3 xp, float3 n, float rd, float rIn, float rOut,
     float dop = 1.0 / (gam * (1.0 - betaD * dot(tangent, photonDir)));  // Doppler factor of the escaping photon
     float grav = sqrt(max(0.0, 1.0 - 1.0 / rd));           // gravitational redshift at emission
 
+    // NASA-fire palette (SVS 14585): saturated red→orange, white only where the
+    // Doppler boost earns it — never a pale cream wash.
     float t = saturate((rd - rIn) / max(0.01, rOut - rIn));
-    float3 cHot  = float3(1.00, 0.985, 0.95);              // white-hot inner rim
-    float3 cMid  = float3(1.00, 0.55, 0.16);               // amber
-    float3 cCool = float3(0.55, 0.14, 0.03);               // dim red outer edge
-    float3 col = t < 0.42 ? mix(cHot, cMid, t / 0.42) : mix(cMid, cCool, (t - 0.42) / 0.58);
+    float3 cHot  = float3(1.00, 0.90, 0.70);               // near-white inner rim
+    float3 cMid  = float3(1.00, 0.45, 0.08);               // vivid orange
+    float3 cCool = float3(0.70, 0.12, 0.02);               // deep red outer edge
+    float3 col = t < 0.3 ? mix(cHot, cMid, t / 0.3) : mix(cMid, cCool, (t - 0.3) / 0.7);
 
     // Gas bands swirling at the (differential) Keplerian rate — inner laps outer.
     // Wide dynamic range: the banding carves real gaps (sky shows through between
@@ -104,13 +106,18 @@ static float4 bh_disc(float3 xp, float3 n, float rd, float rIn, float rOut,
     float texture = 0.30 + 0.85 * band + 0.35 * band2;
 
     float radial = pow(rIn / rd, 2.2);                     // emissivity falls off outward
-    float beam = pow(clamp(dop, 0.22, 3.0), 3.0);          // relativistic beaming
+    float beam = pow(clamp(dop, 0.25, 2.2), 3.0);          // beaming: white earns the centre only
     float3 shifted = col;
     shifted = mix(shifted * float3(1.0, 0.42, 0.22), shifted, saturate(dop));               // receding limb reddens + dims
-    shifted = mix(shifted, shifted * float3(0.72, 0.86, 1.18) + 0.30, saturate(dop - 1.0)); // approaching limb blue-whitens
-    float3 rgb = shifted * (radial * texture * beam) * grav * 3.2 * (1.0 + boost * 2.0);
+    shifted = mix(shifted, shifted * float3(1.16, 1.05, 0.90) + 0.20, saturate(dop - 1.0)); // approaching limb whitens (warm, not blue)
+    float3 rgb = shifted * (radial * texture * beam) * grav * 1.6 * (1.0 + boost * 2.0);
+    float dlum = dot(rgb, float3(0.30, 0.55, 0.15));
+    rgb = max(float3(0.0), mix(float3(dlum), rgb, 1.3));   // saturation push toward the fire
 
-    float alpha = saturate((0.10 + 0.90 * smoothstep(0.40, 1.15, texture)) * (1.0 - t * 0.92) * 0.85);
+    // Optically THICK (NASA's disc shows a single surface, not stacked layers):
+    // high alpha kills the transmittance after the first crossing or two, so the
+    // fire keeps its swirl texture instead of layering into white.
+    float alpha = saturate((0.10 + 0.90 * smoothstep(0.40, 1.15, texture)) * (1.0 - t * 0.92) * 1.4);
     return float4(rgb, alpha);
 }
 
@@ -172,7 +179,7 @@ fragment float4 lens_fragment(LensVSOut in [[stage_in]],
     // crowds bright toward the travel axis and the shadow shrinks. 0.5×β: real
     // geometry (the camera truly falls to r → rs) now provides the engulfment, so
     // the aberration can be stronger without the hole appearing to recede.
-    if (u.beta > 0.001) dir = bh_aberrate(dir, fwd, -u.beta * 0.5);
+    if (u.beta > 0.001) dir = bh_aberrate(dir, fwd, -u.beta * 0.6);
 
     float dAlong = dot(hp, dir);
     float3 cvec = dir * max(dAlong, 0.0) - hp;             // hole → closest approach
@@ -255,15 +262,19 @@ fragment float4 lens_fragment(LensVSOut in [[stage_in]],
             // bent rays blend seamlessly with the on-screen haze.
             float3 n = normalize(float3(u.dnx, u.dny, u.dnz));
             float planeDist = dot(outDir, n);
-            float band = exp(-planeDist * planeDist * 5.0);
-            // Fades with speed AND proximity: near the hole the sky should be
-            // NASA-dark (stars + disc only), not a warm fog — the ambient exists
-            // to blend the far view with the on-screen bulge haze.
-            float calm = (1.0 - 0.8 * saturate(u.beta / 0.7))
+            // The Milky Way as a THIN, dusty, textured band (NASA SVS 14585): the
+            // luminous actor that lensing bends into arcs and rings around the
+            // shadow — not a warm fog. Persists through the plunge (it's the show);
+            // only a faint wide haze fades with speed and proximity.
+            float bandProfile = exp(-planeDist * planeDist * 35.0);
+            float bandTex = 0.55 + 0.45 * bh_noise(float2(atan2(outDir.y, outDir.x) * 6.0,
+                                                          planeDist * 14.0));
+            b.rgb += float3(0.72, 0.58, 0.42) * (0.32 * bandProfile * bandTex);
+            float haze = exp(-planeDist * planeDist * 5.0) * 0.05
+                       * (1.0 - 0.8 * saturate(u.beta / 0.7))
                        * saturate((length(hp) / u.rs - 5.0) / 15.0);
-            float3 bulge = float3(1.0, 0.82, 0.55) * (0.30 * band + 0.05) * calm;
-            b.rgb += bulge;
-            b.a = max(b.a, (0.75 * band + 0.18) * calm);
+            b.rgb += float3(1.0, 0.82, 0.55) * haze;
+            b.a = max(b.a, bandProfile * 0.5);
             bg = mix(bg, b.rgb, bakeW);
             bgA = mix(bgA, b.a, bakeW);
         }
@@ -332,7 +343,7 @@ vertex BakeVSOut bake_vertex(uint vid [[vertex_id]],
     float pxPerRad = u.texW / (2.0 * M_PI_F);
     float worldPx = s.radius * pxPerRad / dist;
     float screenPx = s.radius / dist;
-    float px = clamp(s.mode < 0.5 ? worldPx : screenPx, max(s.minPixel, 1.1), s.maxPixel);
+    float px = clamp(s.mode < 0.5 ? worldPx : screenPx, max(s.minPixel, 1.5), s.maxPixel);
 
     float2 ndc = float2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
     ndc += kBakeCorners[vid] * (px / (float2(u.texW, u.texH) * 0.5));

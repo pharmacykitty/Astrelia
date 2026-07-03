@@ -470,7 +470,7 @@ struct GalaxyMapView: View {
                 camera.holePos = holePos
                 camera.holeRs = rs
                 camera.diskInner = rs * 3          // ISCO
-                camera.diskOuter = rs * 10
+                camera.diskOuter = rs * 12.4       // NASA SVS 14585 proportions
                 camera.diskNormal = Galactic.north
                 camera.right = side
                 camera.up = simd_cross(side, f)
