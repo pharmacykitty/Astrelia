@@ -4,7 +4,6 @@ import ARKit
 import AVFoundation
 import simd
 import CelestialCore
-import Astrology
 
 // SwiftUI also declares `Angle`; in this file we always mean the astronomy one.
 private typealias Angle = CelestialCore.Angle
@@ -28,11 +27,9 @@ struct ContentView: View {
     @State private var mode: SkyMode = .virtual
     @State private var starField: [StarPoint] = []          // sorted brightest-first
     @State private var constellationPaths: [ConstellationPath] = []
-    // Zodiac overlay (F11): the ecliptic sampled as world directions, the twelve
-    // sign glyphs at their midpoints, and the live planets — all recomputed on the
-    // calm 1.5 s refresh, never per frame.
+    // Ecliptic overlay: the ecliptic sampled as world directions and the live
+    // planets — all recomputed on the calm 1.5 s refresh, never per frame.
     @State private var eclipticPoints: [SIMD3<Double>] = []
-    @State private var zodiacGlyphs: [SkyGlyph] = []
     @State private var planetGlyphs: [SkyGlyph] = []
 
     @State private var fieldOfView = 65.0
@@ -180,8 +177,8 @@ struct ContentView: View {
                 }
             }
 
-            // Ecliptic (the Sun's path / zodiac belt), drawn behind the stars.
-            if filters.showZodiac {
+            // Ecliptic (the Sun's path across the sky), drawn behind the stars.
+            if filters.showEcliptic {
                 var ecliptic = Path()
                 var previous: CGPoint?
                 for direction in eclipticPoints {
@@ -192,8 +189,8 @@ struct ContentView: View {
                         previous = nil
                     }
                 }
-                context.stroke(ecliptic, with: .color(Self.zodiacGold.opacity(0.30)), lineWidth: 3)
-                context.stroke(ecliptic, with: .color(Self.zodiacGold.opacity(0.65)), lineWidth: 1)
+                context.stroke(ecliptic, with: .color(Self.eclipticGold.opacity(0.30)), lineWidth: 3)
+                context.stroke(ecliptic, with: .color(Self.eclipticGold.opacity(0.65)), lineWidth: 1)
             }
 
             // Stars.
@@ -240,13 +237,8 @@ struct ContentView: View {
                 }
             }
 
-            // Zodiac sign glyphs along the ecliptic, then the planets on top.
-            if filters.showZodiac {
-                for glyph in zodiacGlyphs {
-                    guard let point = camera.projectDirection(glyph.direction), within(point, size, margin: 0) else { continue }
-                    place(Text(glyph.symbol).font(.system(size: 15))
-                        .foregroundStyle(glyph.color.opacity(0.85)), at: point)
-                }
+            // The planets on top.
+            if filters.showEcliptic {
                 for planet in planetGlyphs {
                     guard let point = camera.projectDirection(planet.direction), within(point, size, margin: 0) else { continue }
                     let halo = 5.0
@@ -636,7 +628,7 @@ struct ContentView: View {
         guard let latitude = provider.latitude, let longitude = provider.longitude else {
             if !starField.isEmpty { starField = [] }
             if !constellationPaths.isEmpty { constellationPaths = [] }
-            if !eclipticPoints.isEmpty { eclipticPoints = []; zodiacGlyphs = []; planetGlyphs = [] }
+            if !eclipticPoints.isEmpty { eclipticPoints = []; planetGlyphs = [] }
             return
         }
         let location = GeographicLocation(latitude: .degrees(latitude), longitude: .degrees(longitude))
@@ -688,7 +680,7 @@ struct ContentView: View {
             constellationPaths = []
         }
 
-        if filters.showZodiac {
+        if filters.showEcliptic {
             let obliquity = Earth.meanObliquity(at: jd)
             func direction(eclipticLongitude lon: Double, latitude beta: Double = 0) -> SIMD3<Double> {
                 let equatorial = CoordinateTransform.equatorial(
@@ -701,12 +693,6 @@ struct ContentView: View {
             // The ecliptic, sampled every 3° around the full circle.
             eclipticPoints = stride(from: 0.0, through: 360.0, by: 3.0).map { direction(eclipticLongitude: $0) }
 
-            // A glyph at each sign's midpoint (Aries 15°, Taurus 45°, …).
-            zodiacGlyphs = ZodiacSign.allCases.map { sign in
-                SkyGlyph(direction: direction(eclipticLongitude: sign.startLongitude.degrees + 15),
-                         symbol: sign.glyph, name: sign.name, color: Self.zodiacGold)
-            }
-
             // The live planets at their true positions on the sky.
             planetGlyphs = Planet.allCases.map { planet in
                 let horizon = CoordinateTransform.horizontal(Planets.position(planet, at: jd), at: location, time: jd)
@@ -715,13 +701,13 @@ struct ContentView: View {
                                 color: Self.planetColor(planet))
             }
         } else if !eclipticPoints.isEmpty {
-            eclipticPoints = []; zodiacGlyphs = []; planetGlyphs = []
+            eclipticPoints = []; planetGlyphs = []
         }
     }
 
-    // MARK: Zodiac overlay helpers
+    // MARK: Ecliptic overlay helpers
 
-    static let zodiacGold = Color(red: 1.0, green: 0.84, blue: 0.45)
+    static let eclipticGold = Color(red: 1.0, green: 0.84, blue: 0.45)
 
     private static func planetSymbol(_ p: Planet) -> String {
         // Append U+FE0E so ♀/♂ render as line-art, never colour emoji (see CLAUDE.md).

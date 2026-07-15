@@ -17,9 +17,7 @@ settings:
 
 packages:
   CelestialCore:
-    path: Packages/CelestialCore
-  Astrology:
-    path: Packages/Astrology
+    path: ../AstroPackages/CelestialCore
 
 targets:
   Astrolabe:
@@ -30,8 +28,6 @@ targets:
     dependencies:
       - package: CelestialCore
         product: CelestialCore
-      - package: Astrology
-        product: Astrology
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.astrolabe.app

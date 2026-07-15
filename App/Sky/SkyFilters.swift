@@ -8,7 +8,7 @@ struct SkyFilters: Equatable {
     var showLabels = true             // names on stars (more appear as you zoom in)
     var showConstellations = true     // stick-figure lines
     var showSunMoon = true
-    var showZodiac = false            // ecliptic line, zodiac sign glyphs, live planets
+    var showEcliptic = false          // ecliptic line + live planets
     var showBelowHorizon = true       // keep showing things beneath the horizon
     var showColourKey = false         // legend: star colour ≈ temperature
 }
@@ -59,12 +59,12 @@ struct FilterSheet: View {
 
                 Section {
                     Toggle("Sun & Moon", isOn: $filters.showSunMoon)
-                    Toggle("Ecliptic & zodiac", isOn: $filters.showZodiac)
+                    Toggle("Ecliptic & planets", isOn: $filters.showEcliptic)
                 } header: {
                     Text("Solar system")
                 } footer: {
-                    if filters.showZodiac {
-                        Text("Draws the ecliptic, the twelve zodiac signs, and the planets at their real positions in the sky.")
+                    if filters.showEcliptic {
+                        Text("Draws the ecliptic and the planets at their real positions in the sky.")
                     }
                 }
 

@@ -16,7 +16,6 @@ struct MoreMenuView: View {
                     VStack(spacing: 30) {
                         header
                         section("Explore", [.tonight, .catalog, .constellations, .galaxyMap])
-                        section("Interpret", [.astrology])
                         section(nil, [.about])
                     }
                     .padding(20)
@@ -81,7 +80,6 @@ struct MoreMenuView: View {
         case .catalog: CatalogView(store: store, exo: exo)
         case .constellations: ConstellationsView(store: store)
         case .galaxyMap: GalaxyMapView(store: store, exo: exo)
-        case .astrology: AstrologyHomeView(store: store)
         case .about: AboutView()
         }
     }
@@ -195,7 +193,7 @@ struct SeededGenerator: RandomNumberGenerator {
 
 /// The future top-level screens. Real content arrives later.
 enum AppScreen: Hashable, CaseIterable {
-    case tonight, catalog, constellations, galaxyMap, astrology, about
+    case tonight, catalog, constellations, galaxyMap, about
 
     var title: String {
         switch self {
@@ -203,7 +201,6 @@ enum AppScreen: Hashable, CaseIterable {
         case .catalog: "Catalog"
         case .constellations: "Constellations"
         case .galaxyMap: "Galaxy Map"
-        case .astrology: "Astrology"
         case .about: "About"
         }
     }
@@ -214,7 +211,6 @@ enum AppScreen: Hashable, CaseIterable {
         case .catalog: "Search stars, planets & deep-sky objects"
         case .constellations: "The 88, plus asterisms, lost & cultural figures"
         case .galaxyMap: "Fly through the galaxy in 3D"
-        case .astrology: "Charts, zodiac & transits"
         case .about: "Data sources, credits & licenses"
         }
     }
@@ -225,7 +221,6 @@ enum AppScreen: Hashable, CaseIterable {
         case .catalog: "binoculars.fill"
         case .constellations: "point.3.connected.trianglepath.dotted"
         case .galaxyMap: "globe.americas.fill"
-        case .astrology: "moon.stars.fill"
         case .about: "info.circle.fill"
         }
     }
@@ -237,7 +232,6 @@ enum AppScreen: Hashable, CaseIterable {
         case .catalog: "sparkles"
         case .constellations: "point.3.connected.trianglepath.dotted"
         case .galaxyMap: "hurricane"
-        case .astrology: "moon.stars.fill"
         case .about: "book.closed.fill"
         }
     }
@@ -248,7 +242,6 @@ enum AppScreen: Hashable, CaseIterable {
         case .catalog: .cyan
         case .constellations: Theme.accent
         case .galaxyMap: .purple
-        case .astrology: .yellow
         case .about: .gray
         }
     }
@@ -259,7 +252,6 @@ enum AppScreen: Hashable, CaseIterable {
         case .catalog: [Color(red: 0.2, green: 0.8, blue: 0.95), Color(red: 0.1, green: 0.45, blue: 0.9)]
         case .constellations: [Color(red: 0.56, green: 0.72, blue: 1.0), Color(red: 0.32, green: 0.45, blue: 0.85)]
         case .galaxyMap: [Color(red: 0.6, green: 0.35, blue: 0.95), Color(red: 0.35, green: 0.2, blue: 0.7)]
-        case .astrology: [Color(red: 0.98, green: 0.8, blue: 0.35), Color(red: 0.95, green: 0.5, blue: 0.3)]
         case .about: [Color(white: 0.55), Color(white: 0.32)]
         }
     }
