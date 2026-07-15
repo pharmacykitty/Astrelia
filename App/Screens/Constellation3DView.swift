@@ -12,6 +12,9 @@ import CelestialCore
 struct Constellation3DView: View {
     let figure: SkyFigure
     let store: StarCatalogStore
+    /// Debug-only (snapshot harness): open pre-rotated/zoomed instead of the front
+    /// view + depth-bloom intro, so screenshots land on a reproducible 3D pose.
+    var debugPose: (yawOffset: Float, pitchOffset: Float, zoom: Float)? = nil
     @Environment(\.dismiss) private var dismiss
 
     @State private var model: Constellation3DModel?
@@ -237,7 +240,14 @@ struct Constellation3DView: View {
         yaw = frontYaw; pitch = frontPitch; distance = frontDistance
         zoomAnchor = frontDistance
         model = built
-        playDepthBloom()
+        if let pose = debugPose {
+            yaw = frontYaw + pose.yawOffset
+            pitch = max(-1.5699, min(1.5699, frontPitch + pose.pitchOffset))
+            distance = frontDistance * pose.zoom
+            zoomAnchor = distance
+        } else {
+            playDepthBloom()
+        }
     }
 
     /// A one-shot "here's the depth" gesture on open: gently arcs the camera off the
