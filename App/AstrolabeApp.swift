@@ -23,6 +23,15 @@ struct AstrolabeApp: App {
                 let args = ProcessInfo.processInfo.arguments
                 let name = (i + 1 < args.count && !args[i + 1].hasPrefix("-")) ? args[i + 1] : "Orion"
                 Constellation3DHarness(figureName: name)
+            } else if ProcessInfo.processInfo.arguments.contains("-snapshotCatalog") {
+                NavigationStack { CatalogSnapshotHarness() }
+                    .preferredColorScheme(.dark)
+            } else if ProcessInfo.processInfo.arguments.contains("-snapshotFigures") {
+                NavigationStack { FiguresSnapshotHarness() }
+                    .preferredColorScheme(.dark)
+            } else if ProcessInfo.processInfo.arguments.contains("-snapshotAbout") {
+                NavigationStack { AboutView() }
+                    .preferredColorScheme(.dark)
             } else if ProcessInfo.processInfo.arguments.contains("-snapshotTonight") {
                 NavigationStack {
                     TonightView(fixedLocation: GeographicLocation(latitude: .degrees(40.71),
@@ -78,7 +87,7 @@ private struct Constellation3DHarness: View {
         .task {
             store.loadIfNeeded()
             while store.catalog == nil || store.constellations.isEmpty {
-                try? await Task.sleep(nanoseconds: 50_000_000)
+                try? await Task.sleep(for: .milliseconds(50))
             }
             var byAbbr: [String: [[SIMD2<Double>]]] = [:]
             for c in store.constellations {
@@ -89,6 +98,27 @@ private struct Constellation3DHarness: View {
             figure = figures.first { $0.name.localizedCaseInsensitiveContains(figureName) }
                 ?? figures.first
         }
+    }
+}
+
+/// Debug host for `-snapshotCatalog`: the Catalog browse list, direct.
+private struct CatalogSnapshotHarness: View {
+    @State private var store = StarCatalogStore()
+    @State private var exo = ExoplanetStore()
+
+    var body: some View {
+        CatalogView(store: store, exo: exo)
+            .task { store.loadIfNeeded(); exo.loadIfNeeded() }
+    }
+}
+
+/// Debug host for `-snapshotFigures`: the Constellations browse list, direct.
+private struct FiguresSnapshotHarness: View {
+    @State private var store = StarCatalogStore()
+
+    var body: some View {
+        ConstellationsView(store: store)
+            .task { store.loadIfNeeded() }
     }
 }
 

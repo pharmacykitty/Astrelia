@@ -33,9 +33,13 @@ struct GalaxyMapView: View {
     @State private var flightTask: Task<Void, Never>?
 
     // Metal renderer (Phase 7) — the only renderer. The scene is rebuilt (and
-    // `version` bumped) whenever the catalogue or art changes.
+    // `version` bumped) whenever the catalogue or art changes. Rebuilds run off the
+    // main actor (`buildScene`); the landmark/nebula sprites — the expensive part —
+    // are generated once and cached here, since no map toggle affects them.
     @State private var scene = GalaxyScene()
     @State private var sceneVersion = 0
+    @State private var landmarkGroups: LandmarkSpriteGroups?
+    @State private var sceneBuildTask: Task<Void, Never>?
 
     // Orbit camera (parsecs).
     @State private var yaw: Float = 0.6
@@ -61,6 +65,7 @@ struct GalaxyMapView: View {
     // hands the camera to `DiveTimeline` for one staged, time-anchored plunge
     // (BlackHoleDive.swift), rendered by the same in-map lensing pass.
     @State private var diveStart: Date?
+    @State private var epilogueTask: Task<Void, Never>?   // auto-hide for the dive epilogue
     @State private var diveRRs: Double = .infinity   // narrative radius (rs) for the HUD
     @State private var diveEntry: (eye: SIMD3<Float>, yaw: Float, pitch: Float)?
     @State private var showDiveEpilogue = false
@@ -95,13 +100,15 @@ struct GalaxyMapView: View {
             let hostHIPs = exo.hostHIPs
 
             ZStack {
-                LinearGradient(colors: [Color(red: 0.01, green: 0.01, blue: 0.05), .black],
-                               startPoint: .top, endPoint: .bottom)
+                // The app's one night (Theme.spaceGradient) — the Metal scene covers
+                // nearly all of it, so the map stays as dark as it ever was.
+                Theme.spaceGradient
 
                 // Gestures live on the render layer (below the overlay) so taps on
                 // overlay buttons interact with the button, not the stars behind it.
                 GalaxyMetalView(scene: scene, sceneVersion: sceneVersion,
                                 camera: makeCamera(aspect: Float(size.width / max(size.height, 1)), size: size),
+                                paused: shownSystem != nil || showCatalog,
                                 diveChannel: diveChannel)
                     .contentShape(Rectangle())
                     .gesture(dragGesture)
@@ -128,7 +135,7 @@ struct GalaxyMapView: View {
             buildStars(); buildBackdrop(); buildScene(); applyInitialFocusIfNeeded()
         }
         .onChange(of: exo.hostHIPs.count) { buildScene() }
-        .onDisappear { flightTask?.cancel(); flyTask?.cancel() }
+        .onDisappear { flightTask?.cancel(); flyTask?.cancel(); sceneBuildTask?.cancel(); epilogueTask?.cancel() }
         .fullScreenCover(item: $shownSystem) { SystemView(system: $0) }
         .fullScreenCover(isPresented: $showCatalog) {
             NavigationStack {
@@ -190,7 +197,7 @@ struct GalaxyMapView: View {
                     Spacer()
                     CircleIconButton(label: "View options", systemImage: "slider.horizontal.3",
                                      isActive: showOptions) {
-                        withAnimation(.spring(duration: 0.3)) { showOptions.toggle() }
+                        withAnimation(Theme.spring) { showOptions.toggle() }
                     }
                     flyButton
                 }
@@ -202,7 +209,7 @@ struct GalaxyMapView: View {
                 HStack {
                     Text("\(stars.count.formatted()) stars")
                         .font(.footnote.monospacedDigit())
-                        .foregroundStyle(.white.opacity(0.5))
+                        .foregroundStyle(Theme.textTertiary)
                         .shadow(radius: 3)
                     Spacer()
                 }
@@ -212,12 +219,13 @@ struct GalaxyMapView: View {
                 Spacer()
 
                 if let selection {
-                    selectionCard(selection)
+                    selectionCard(selection).transition(Theme.slide(from: .bottom))
                 } else {
                     Text(flyMode ? "Drag to steer · two-finger drag up/down to set speed"
                                  : "Drag to orbit · pinch to zoom · tap a star or landmark")
-                        .font(.caption).foregroundStyle(.white.opacity(0.4))
+                        .font(.caption).foregroundStyle(Theme.textTertiary)
                         .multilineTextAlignment(.center).padding(.horizontal)
+                        .transition(.opacity)
                 }
 
                 // Distance from Earth: faint, quiet text along the bottom — the
@@ -320,7 +328,7 @@ struct GalaxyMapView: View {
     }
 
     private func closeOptions() {
-        withAnimation(.spring(duration: 0.3)) { showOptions = false }
+        withAnimation(Theme.spring) { showOptions = false }
     }
 
     @ViewBuilder
@@ -366,7 +374,7 @@ struct GalaxyMapView: View {
             HStack {
                 Text(title).font(.title3.weight(.semibold)).foregroundStyle(.white)
                 Spacer()
-                Button { selection = nil } label: {
+                Button { withAnimation(Theme.spring) { selection = nil } } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.title3)
                         .foregroundStyle(.white.opacity(0.5))
@@ -377,9 +385,9 @@ struct GalaxyMapView: View {
                 .accessibilityLabel("Dismiss \(title)")
             }
             .padding(.trailing, -10)   // pull the 44pt hit area back to the card edge
-            Text(detail).font(.caption.monospacedDigit()).foregroundStyle(.white.opacity(0.7))
+            Text(detail).font(.caption.monospacedDigit()).foregroundStyle(Theme.textSecondary)
             if let body {
-                Text(body).font(.caption).foregroundStyle(.white.opacity(0.6)).fixedSize(horizontal: false, vertical: true)
+                Text(body).font(.caption).foregroundStyle(Theme.textSecondary).fixedSize(horizontal: false, vertical: true)
             }
             VStack(spacing: 8) {
                 Button(action: fly) {
@@ -491,7 +499,7 @@ struct GalaxyMapView: View {
 
     // MARK: Metal scene
 
-    private func rgba(_ color: Color) -> SIMD4<Float> {
+    nonisolated private static func rgba(_ color: Color) -> SIMD4<Float> {
         var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
         UIColor(color).getRed(&r, green: &g, blue: &b, alpha: &a)
         return SIMD4(Float(r), Float(g), Float(b), Float(a))
@@ -503,17 +511,67 @@ struct GalaxyMapView: View {
     /// (Landmarks/nebulae/labels are ported in a later milestone.)
     private func buildScene() {
         guard !stars.isEmpty else { return }
+        // Snapshot everything the builder needs, then leave the main actor: the
+        // landmark/nebula generation (first time only — cached after) and the
+        // full sprite assembly are far too heavy to run under a live render loop.
+        // A newer rebuild cancels an in-flight one, so toggle spam settles on the
+        // latest state instead of racing.
+        let stars = self.stars, backdrop = self.backdrop, backdropDust = self.backdropDust
+        let hostHIPs = exo.hostHIPs, hostsOnly = self.hostsOnly, showMilkyWay = self.showMilkyWay
+        let cachedLandmarks = landmarkGroups
+        sceneBuildTask?.cancel()
+        sceneBuildTask = Task {
+            // First visit only: the landmark generation takes seconds, and the map
+            // shouldn't open onto black while it runs — so publish a stars-only
+            // scene immediately (milliseconds) and let the nebulae follow.
+            if cachedLandmarks == nil {
+                let quick = await Task.detached(priority: .userInitiated) {
+                    Self.assembleScene(stars: stars, backdrop: backdrop,
+                                       backdropDust: backdropDust, hostHIPs: hostHIPs,
+                                       hostsOnly: hostsOnly, showMilkyWay: showMilkyWay,
+                                       landmarks: LandmarkSpriteGroups())
+                }.value
+                guard !Task.isCancelled else { return }
+                scene = quick
+                sceneVersion += 1
+            }
+            let result = await Task.detached(priority: .userInitiated) {
+                let landmarks = cachedLandmarks ?? Self.buildLandmarkGroups()
+                let built = Self.assembleScene(stars: stars, backdrop: backdrop,
+                                               backdropDust: backdropDust, hostHIPs: hostHIPs,
+                                               hostsOnly: hostsOnly, showMilkyWay: showMilkyWay,
+                                               landmarks: landmarks)
+                return (landmarks: landmarks, scene: built)
+            }.value
+            guard !Task.isCancelled else { return }
+            landmarkGroups = result.landmarks
+            scene = result.scene
+            sceneVersion += 1
+        }
+    }
+
+    /// Generates every landmark's sprites (procedural + image-baked). This is the
+    /// scene's expensive half — the baked nebulae alone are ~1.25M particles — and
+    /// it depends on no map toggle, so `buildScene` caches the result for the
+    /// map's lifetime and later rebuilds only re-derive stars/backdrop.
+    nonisolated private static func buildLandmarkGroups() -> LandmarkSpriteGroups {
+        var groups = LandmarkSpriteGroups()
+        appendLandmarkSprites(&groups.light, &groups.occluder, &groups.overlay)
+        return groups
+    }
+
+    nonisolated private static func assembleScene(
+        stars: [GalaxyStar], backdrop: [BackdropPoint], backdropDust: [BackdropPoint],
+        hostHIPs: Set<Int>, hostsOnly: Bool, showMilkyWay: Bool,
+        landmarks: LandmarkSpriteGroups
+    ) -> GalaxyScene {
         let starCols = starPalette.map(rgba)
         let backCols = backdropPalette.map(rgba)
         let dust = rgba(backdropDustColor)
 
-        let hostHIPs = exo.hostHIPs
-
         var additive: [GalaxySprite] = []          // occludee light (stars, Milky Way) — tests depth
         additive.reserveCapacity(stars.count + (showMilkyWay ? backdrop.count * 2 : 0) + 4000)
-        var landmarkLight: [GalaxySprite] = []      // landmark/nebula light — never depth-tested
-        var occluder: [GalaxySprite] = []           // invisible depth-only caps (dense, opaque cores)
-        var overlay: [GalaxySprite] = []
+        var overlay = landmarks.overlay             // landmark dust + (below) Milky Way dust lanes
 
         for s in stars {
             if hostsOnly && !(s.hip.map { hostHIPs.contains($0) } ?? false) { continue }
@@ -540,9 +598,6 @@ struct GalaxyMapView: View {
                                      minPixel: 3, maxPixel: 7, softness: 0, mode: 1))
         additive.append(GalaxySprite(position: .zero, radius: 950, color: SIMD4(1.0, 0.6, 0.1, 0.28),
                                      minPixel: 7, maxPixel: 20, softness: 1, mode: 1))
-
-        // Landmarks (nebulae, clusters, galaxies, black holes) as world-space sprites.
-        appendLandmarkSprites(&landmarkLight, &occluder, &overlay)
 
         if showMilkyWay {
             // A soft warm nucleus glow (modest so it doesn't wash out when flown into;
@@ -572,8 +627,8 @@ struct GalaxyMapView: View {
             }
         }
 
-        scene = GalaxyScene(additive: additive, landmarkLight: landmarkLight, occluder: occluder, overlay: overlay)
-        sceneVersion += 1
+        return GalaxyScene(additive: additive, landmarkLight: landmarks.light,
+                           occluder: landmarks.occluder, overlay: overlay)
     }
 
     /// Emits world-space sprite instances for every landmark — the GPU equivalent of
@@ -581,7 +636,7 @@ struct GalaxyMapView: View {
     /// so each object looks identical run to run and parallaxes with the camera.
     // `additive` here receives landmark/nebula *light* (it is never depth-tested);
     // `occluder` receives invisible depth-only caps marking dense, opaque cores.
-    private func appendLandmarkSprites(_ additive: inout [GalaxySprite], _ occluder: inout [GalaxySprite], _ overlay: inout [GalaxySprite]) {
+    nonisolated private static func appendLandmarkSprites(_ additive: inout [GalaxySprite], _ occluder: inout [GalaxySprite], _ overlay: inout [GalaxySprite]) {
         let pink = SIMD4<Float>(1.0, 0.55, 0.72, 1)
         let dustC = rgba(backdropDustColor)
         // Astrophysical emission palette for the overhauled landmark looks.
@@ -899,7 +954,7 @@ struct GalaxyMapView: View {
     /// Places an image-baked nebula: the normalised particle sheet is oriented to
     /// face Earth (the origin) at the landmark's real position/scale, with per-particle
     /// depth synthesised so it reads as the photo head-on and as a volume when orbited.
-    private func appendBakedNebula(_ lm: Landmark, _ model: NebulaParticleSet,
+    nonisolated private static func appendBakedNebula(_ lm: Landmark, _ model: NebulaParticleSet,
                                    center: SIMD3<Float>, physR: Float, dustC: SIMD4<Float>,
                                    _ additive: inout [GalaxySprite], _ occluder: inout [GalaxySprite],
                                    _ overlay: inout [GalaxySprite]) {
@@ -1030,6 +1085,7 @@ struct GalaxyMapView: View {
         diveEntry = (eye, yaw, pitch)
         diveRRs = Double(DivePhysics.captureRadiusRs)
         diveStart = Date()
+        epilogueTask?.cancel()
         showDiveEpilogue = false
         throttle = 0
         throttling = false
@@ -1080,8 +1136,12 @@ struct GalaxyMapView: View {
         diveEntry = nil
         selection = .landmark(hole)
         withAnimation(.easeIn(duration: 0.6)) { showDiveEpilogue = true }
-        Task { @MainActor in
+        // Held (not fire-and-forget) so a second dive within 8 s can't have the
+        // stale timer hide its epilogue early.
+        epilogueTask?.cancel()
+        epilogueTask = Task { @MainActor in
             try? await Task.sleep(for: .seconds(8))
+            guard !Task.isCancelled else { return }
             withAnimation(.easeOut(duration: 1.2)) { showDiveEpilogue = false }
         }
     }
@@ -1111,12 +1171,12 @@ struct GalaxyMapView: View {
         switch focus {
         case .landmark(let lm):
             focusApplied = true
-            selection = .landmark(lm)
+            withAnimation(Theme.spring) { selection = .landmark(lm) }
             animateCamera(to: lm.positionParsecs, distance: lm.suggestedViewDistance, duration: 1.6)
         case .star(let id):
             guard let gs = stars.first(where: { $0.id == id }) else { return }   // wait for stars to build
             focusApplied = true
-            selection = .star(gs)
+            withAnimation(Theme.spring) { selection = .star(gs) }
             animateCamera(to: gs.position, distance: 40, duration: 1.6)
         case .blackHole(let dive):
             guard !stars.isEmpty, let hole = Self.sgrA else { return }
@@ -1186,8 +1246,13 @@ struct GalaxyMapView: View {
             .onChanged { value in
                 // Ignore stray single-finger tracking while a two-finger throttle
                 // gesture is in progress, so the view doesn't drift as you set speed.
-                // The dive owns the camera outright.
-                guard !throttling, diveStart == nil else { return }
+                // The dive owns the camera outright. Keep tracking the finger even
+                // while ignoring it — otherwise the accumulated translation lands
+                // as one snap of the view the moment the throttle lifts.
+                guard !throttling, diveStart == nil else {
+                    dragPrevious = value.translation
+                    return
+                }
                 flightTask?.cancel()
                 let dx = Float(value.translation.width - dragPrevious.width)
                 let dy = Float(value.translation.height - dragPrevious.height)
@@ -1199,11 +1264,11 @@ struct GalaxyMapView: View {
     }
 
     private var zoomGesture: some Gesture {
-        MagnificationGesture()
+        MagnifyGesture()
             .onChanged { value in
                 guard !flyMode, diveStart == nil else { return }   // in fly mode two fingers set throttle, not zoom
                 flightTask?.cancel()
-                distance = min(60000, max(2, zoomAnchor / Float(value)))
+                distance = min(60000, max(2, zoomAnchor / Float(value.magnification)))
             }
             .onEnded { _ in zoomAnchor = distance }
     }
@@ -1219,13 +1284,13 @@ struct GalaxyMapView: View {
                 if d < 26, bestLandmark == nil || d < bestLandmark!.distance { bestLandmark = (d, landmark) }
             }
             if let bestLandmark {
-                selection = .landmark(bestLandmark.landmark)
+                withAnimation(Theme.spring) { selection = .landmark(bestLandmark.landmark) }
                 return
             }
             // The Sun (at the origin) — a real, always-present target with a rich system.
             if let (sunPoint, _) = project(.zero, viewProjection, size),
                hypot(sunPoint.x - event.location.x, sunPoint.y - event.location.y) < 22 {
-                selection = .sun
+                withAnimation(Theme.spring) { selection = .sun }
                 return
             }
             var bestStar: (distance: CGFloat, star: GalaxyStar)?
@@ -1238,7 +1303,7 @@ struct GalaxyMapView: View {
                 let d = hypot(point.x - event.location.x, point.y - event.location.y)
                 if d < 22, bestStar == nil || d < bestStar!.distance { bestStar = (d, star) }
             }
-            selection = bestStar.map { .star($0.star) }
+            withAnimation(Theme.spring) { selection = bestStar.map { .star($0.star) } }
         }
     }
 
@@ -1451,6 +1516,14 @@ struct GalaxyMapView: View {
     }
 }
 
+/// The landmark/nebula sprite groups — toggle-independent, so generated once per
+/// map visit (off the main actor) and reused by every subsequent scene assembly.
+private struct LandmarkSpriteGroups: Sendable {
+    var light: [GalaxySprite] = []      // landmark/nebula light — never depth-tested
+    var occluder: [GalaxySprite] = []   // invisible depth-only caps (dense, opaque cores)
+    var overlay: [GalaxySprite] = []    // dark dust puffs / lanes
+}
+
 private struct GalaxyStar: Identifiable {
     let id: Int
     let hip: Int?
@@ -1510,7 +1583,7 @@ private struct DistanceReadout: View {
     var body: some View {
         Text(text)
             .font(.caption.monospacedDigit())
-            .foregroundStyle(.white.opacity(0.38))
+            .foregroundStyle(Theme.textTertiary)
             .shadow(radius: 3)
             .allowsHitTesting(false)
     }
@@ -1548,13 +1621,15 @@ private struct SpeedReadout: View {
             Image(systemName: forward ? "chevron.up" : "chevron.down")
                 .font(.caption2.weight(.bold))
             Text("\(pct)%").font(.caption.monospacedDigit().weight(.semibold))
+                .contentTransition(.numericText())
+                .animation(Theme.spring, value: pct)
             Text(String(format: "· %.0f pc/s", speed))
-                .font(.caption2.monospacedDigit()).foregroundStyle(.white.opacity(0.6))
+                .font(.caption2.monospacedDigit()).foregroundStyle(Theme.textSecondary)
         }
         .foregroundStyle(forward ? Color.green : Color.orange)
         .padding(.horizontal, 12).padding(.vertical, 7)
         .background(.ultraThinMaterial, in: Capsule())
-        .overlay(Capsule().strokeBorder(.white.opacity(0.12), lineWidth: 0.5))
+        .overlay { Capsule().strokeBorder(.white.opacity(0.12), lineWidth: 0.5) }
         .allowsHitTesting(false)
     }
 }

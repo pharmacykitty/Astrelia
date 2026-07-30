@@ -39,6 +39,29 @@ enum Theme {
         colors: [Color(red: 0.03, green: 0.04, blue: 0.12), .black],
         startPoint: .top, endPoint: .bottom
     )
+
+    // MARK: Text emphasis
+
+    // One vocabulary for text over the dark sky instead of ad-hoc opacities.
+    // Primary text is plain `.white`; informational text never drops below
+    // `textTertiary` — that's the legibility floor on black.
+    static let textSecondary = Color.white.opacity(0.65)
+    static let textTertiary = Color.white.opacity(0.55)
+
+    // MARK: Motion
+
+    /// The app's one motion curve for chrome: every state-driven show/hide,
+    /// selection change, and layout shift animates with this spring so the whole
+    /// UI moves like a single instrument. (Press feedback stays faster — see
+    /// `LuminousButtonStyle`.)
+    static let spring = Animation.spring(duration: 0.35, bounce: 0.15)
+
+    /// How chrome enters and leaves: sliding from the nearest screen edge while
+    /// fading. Pass the edge the element lives against (`.top` for bars under the
+    /// control cluster, `.bottom` for panels above the readout).
+    static func slide(from edge: Edge) -> AnyTransition {
+        .move(edge: edge).combined(with: .opacity)
+    }
 }
 
 extension View {
@@ -57,5 +80,17 @@ extension View {
                     .strokeBorder(tint.opacity(0.35), lineWidth: 1)
             }
             .shadow(color: tint.opacity(0.25), radius: glow)
+    }
+
+    /// The quieter sibling of `luminousSurface`, for utility panels over live
+    /// content (readouts, legends, plot insets): the same glass and hairline ring,
+    /// but untinted and glowless, so it recedes instead of glowing.
+    func quietSurface(cornerRadius: CGFloat = Theme.cardRadius) -> some View {
+        background(.ultraThinMaterial, in: .rect(cornerRadius: cornerRadius))
+            .clipShape(.rect(cornerRadius: cornerRadius))
+            .overlay {
+                RoundedRectangle(cornerRadius: cornerRadius)
+                    .strokeBorder(.white.opacity(0.12), lineWidth: 0.5)
+            }
     }
 }

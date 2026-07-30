@@ -67,7 +67,7 @@ struct Constellation3DView: View {
         }
         .ignoresSafeArea()
         .toolbar(.hidden, for: .navigationBar)
-        .task { build() }
+        .task { await build() }
         .onDisappear { spinTask?.cancel(); resetTask?.cancel(); introTask?.cancel() }
     }
 
@@ -223,9 +223,15 @@ struct Constellation3DView: View {
 
     // MARK: Build
 
-    private func build() {
+    private func build() async {
         guard model == nil, let catalog = store.catalog else { return }
-        let built = Constellation3DModel.build(figure: figure, catalog: catalog)
+        let figure = self.figure
+        // A full-catalog scan with per-star trig plus vertex snapping — run it off
+        // the main actor so the cover's presentation animation isn't frozen (the
+        // ProgressView placeholder never got a frame before).
+        let built = await Task.detached(priority: .userInitiated) {
+            Constellation3DModel.build(figure: figure, catalog: catalog)
+        }.value
         guard !built.stars.isEmpty else { model = built; return }
 
         // Front pose: look from Earth (origin) toward the figure, i.e. the eye sits on
@@ -289,11 +295,11 @@ struct Constellation3DView: View {
     }
 
     private var zoomGesture: some Gesture {
-        MagnificationGesture()
+        MagnifyGesture()
             .onChanged { value in
                 resetTask?.cancel(); introTask?.cancel()
                 let r = model?.radius ?? 1
-                distance = min(r * 14, max(r * 0.4, zoomAnchor / Float(value)))
+                distance = min(r * 14, max(r * 0.4, zoomAnchor / Float(value.magnification)))
             }
             .onEnded { _ in zoomAnchor = distance }
     }

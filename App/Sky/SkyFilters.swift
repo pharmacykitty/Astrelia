@@ -52,10 +52,12 @@ struct FilterSheet: View {
                         Text("Pinch to zoom in — more names appear as you do. Tap any star to identify it.")
                     }
                 }
+                .listRowBackground(Color.white.opacity(0.05))
 
                 Section("Figures") {
                     Toggle("Constellation lines", isOn: $filters.showConstellations)
                 }
+                .listRowBackground(Color.white.opacity(0.05))
 
                 Section {
                     Toggle("Sun & Moon", isOn: $filters.showSunMoon)
@@ -67,16 +69,17 @@ struct FilterSheet: View {
                         Text("Draws the ecliptic and the planets at their real positions in the sky.")
                     }
                 }
+                .listRowBackground(Color.white.opacity(0.05))
 
                 Section {
                     Toggle("Show below the horizon", isOn: $filters.showBelowHorizon)
                 } footer: {
                     Text("Point at the ground to find things that have set — like the Sun at night.")
                 }
+                .listRowBackground(Color.white.opacity(0.05))
             }
             .scrollContentBackground(.hidden)
             .background(Theme.spaceGradient.ignoresSafeArea())
-            .listRowBackground(Color.white.opacity(0.05))
             .tint(Theme.accent)
             .navigationTitle("Sky filters")
             .navigationBarTitleDisplayMode(.inline)
@@ -93,7 +96,7 @@ struct FilterSheet: View {
 
     private var countLabel: String {
         guard let catalog else { return "Loading catalog…" }
-        let count = catalog.stars.lazy.filter { $0.apparentMagnitude <= filters.magnitudeLimit }.count
+        let count = catalog.stars.count(where: { $0.apparentMagnitude <= filters.magnitudeLimit })
         return "\(count) stars visible"
     }
 }

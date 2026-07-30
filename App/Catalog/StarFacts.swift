@@ -270,6 +270,26 @@ enum StarFacts {
         return "Star \(star.id)"
     }
 
+    /// One lowercase haystack per star for the Catalog's live search — built once
+    /// alongside the sorted star list, so a keystroke filters against prebuilt
+    /// strings instead of lowercasing four optional fields per star per keystroke.
+    /// Fields mirror `matches(_:query:)`; newline-joined so a query can't
+    /// accidentally match across field boundaries.
+    static func searchKey(for star: Star) -> String {
+        var parts: [String] = []
+        if let n = star.properName { parts.append(n) }
+        if let bf = star.bayerFlamsteed { parts.append(bf) }
+        if let c = star.constellation {
+            parts.append(c)
+            if let full = constellationName(c) { parts.append(full) }
+        }
+        if let hd = star.henryDraper { parts.append("hd \(hd)") }
+        if let hr = star.harvardRevised { parts.append("hr \(hr)") }
+        if let hip = star.hipparcos { parts.append("hip \(hip)") }
+        if let gl = star.gliese { parts.append(gl) }
+        return parts.joined(separator: "\n").lowercased()
+    }
+
     /// Whether a star matches a lowercased search query across its names,
     /// designations (Bayer/Flamsteed, HR/HD/HIP/Gliese), and constellation.
     static func matches(_ star: Star, query q: String) -> Bool {
@@ -346,16 +366,10 @@ enum StarFacts {
     }
 
     /// Colour adjective (with article) from an effective temperature, for the rare
-    /// star with a colour index but no spectral type.
+    /// star with a colour index but no spectral type. Delegates to the shared
+    /// band table so the words always match the displayed colour.
     private static func colourWord(forTemp t: Double) -> String {
-        switch t {
-        case 10000...: return "a blue-white"
-        case 7500..<10000: return "a white"
-        case 6000..<7500: return "a yellow-white"
-        case 5200..<6000: return "a yellow"
-        case 3700..<5200: return "an orange"
-        default: return "a red"
-        }
+        TemperatureColor.adjective(forKelvin: t)
     }
 
     private static let descriptions: [String: String] = [

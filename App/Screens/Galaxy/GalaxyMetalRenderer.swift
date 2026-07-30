@@ -30,8 +30,9 @@ struct GalaxySprite {
     }
 }
 
-/// The two instance lists, by blend mode. Built on the main thread from the catalogue
-/// + art, then uploaded to GPU buffers when `version` changes.
+/// The two instance lists, by blend mode. Built off the main actor from the
+/// catalogue + art (`GalaxyMapView.buildScene`), then uploaded to GPU buffers when
+/// `version` changes.
 struct GalaxyScene {
     var additive: [GalaxySprite] = []      // occludee light (stars, Milky Way) — tests depth
     var landmarkLight: [GalaxySprite] = [] // landmark/nebula light — no depth interaction
@@ -725,6 +726,10 @@ struct GalaxyMetalView: UIViewRepresentable {
     var scene: GalaxyScene
     var sceneVersion: Int
     var camera: GalaxyCamera
+    /// Stops the display link while the map is invisible (a full-screen cover is
+    /// up) — otherwise the full sprite scene keeps encoding at 60 fps behind the
+    /// cover, pure battery/thermal burn on the screens users dwell on longest.
+    var paused: Bool = false
     var diveChannel: DiveChannel? = nil
 
     func makeCoordinator() -> GalaxyMetalRenderer { GalaxyMetalRenderer() }
@@ -738,7 +743,7 @@ struct GalaxyMetalView: UIViewRepresentable {
         view.framebufferOnly = true
         view.isOpaque = false
         view.clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
-        view.isPaused = false
+        view.isPaused = paused
         view.enableSetNeedsDisplay = false
         view.preferredFramesPerSecond = 60
         view.delegate = context.coordinator
@@ -748,6 +753,7 @@ struct GalaxyMetalView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: MTKView, context: Context) {
+        uiView.isPaused = paused
         context.coordinator.diveChannel = diveChannel
         context.coordinator.update(scene: scene, version: sceneVersion, camera: camera)
     }

@@ -20,6 +20,9 @@ Astrolabe.xcodeproj/
 # Bundled star / celestial data (downloaded, not committed — see README)
 Data/
 
+# Simulator screenshots taken while reviewing UI (scratch, not artwork)
+scratchshots/
+
 # Web workspace (Node / Playwright)
 Web/node_modules/
 Web/test-results/

@@ -13,7 +13,6 @@ struct TonightView: View {
     @State private var phase: MoonPhase?
     @State private var asOf = Date()
     @State private var events: [AstroEvent] = []
-    @State private var computing = false
 
     private var sun: SkyBodyStatus? { statuses.first { $0.kind == .sun } }
     private var moon: SkyBodyStatus? { statuses.first { $0.kind == .moon } }
@@ -44,7 +43,10 @@ struct TonightView: View {
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { if fixedLocation == nil { observer.start() } }
         .onDisappear { observer.stop() }
-        .task(id: observer.latitude) { await recompute() }
+        // Keyed on the full coordinate (not just latitude!) so an east–west move
+        // recomputes rise/set times too. `.task(id:)` cancels and restarts on
+        // change, which is the whole dedup story — no busy flag needed.
+        .task(id: locationKey) { await recompute() }
         .task {
             // Events are geocentric (location-independent) and the 60-day search is
             // heavy, so compute once off the main actor — never in the view body.
@@ -255,18 +257,24 @@ struct TonightView: View {
 
     // MARK: Compute
 
+    /// A stable identity for the observer's coordinate, driving `.task(id:)`.
+    private var locationKey: String? {
+        (fixedLocation ?? observer.location).map {
+            "\($0.latitude.degrees),\($0.longitude.degrees)"
+        }
+    }
+
     private func recompute() async {
-        guard let loc = fixedLocation ?? observer.location, !computing else { return }
-        computing = true
+        guard let loc = fixedLocation ?? observer.location else { return }
         let date = Date()
         // Rise/set scanning is heavy (ephemeris over 24h); keep it off the main actor.
         let result = await Task.detached(priority: .userInitiated) {
             (VisibleSky.status(at: loc, date: date), VisibleSky.moonPhase(at: date))
         }.value
+        guard !Task.isCancelled else { return }   // a newer location's task took over
         statuses = result.0
         phase = result.1
         asOf = date
-        computing = false
     }
 
     // MARK: Formatting

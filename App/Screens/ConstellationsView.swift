@@ -27,10 +27,22 @@ struct ConstellationsView: View {
         return byAbbr
     }
 
-    private func rebuild() {
-        guard !store.constellations.isEmpty else { return }
-        figures = SkyFigureLibrary.build(constellationGeometry: mergedGeometry(),
-                                         catalog: store.catalog)
+    /// Which catalog state the current `figures` were built against — so a
+    /// pop-back (same catalog) never re-runs the full 109k-star `StarResolver`
+    /// build, but the catalog finishing its load still does.
+    @State private var builtCatalogCount = -1
+
+    private func rebuild() async {
+        let count = store.catalog?.count ?? 0
+        guard builtCatalogCount != count, !store.constellations.isEmpty else { return }
+        builtCatalogCount = count
+        let geometry = mergedGeometry()
+        let catalog = store.catalog
+        // The build resolves star tokens against the whole catalog — far too heavy
+        // for the main actor while the push animation runs.
+        figures = await Task.detached(priority: .userInitiated) {
+            SkyFigureLibrary.build(constellationGeometry: geometry, catalog: catalog)
+        }.value
     }
 
     /// Figures in the chosen category that match the search query.
@@ -109,9 +121,12 @@ struct ConstellationsView: View {
         }
         .navigationTitle("Constellations")
         .navigationBarTitleDisplayMode(.inline)
-        .searchable(text: $query, prompt: "Search every figure…")
-        .task(id: store.catalog?.count ?? 0) { rebuild() }
-        .onAppear(perform: rebuild)
+        // The same bottom search capsule as the Catalog (thumb reach, luminous
+        // language) — the browse screens share one search paradigm.
+        .safeAreaInset(edge: .bottom) {
+            LuminousSearchField(query: $query, prompt: "Search every figure…")
+        }
+        .task(id: store.catalog?.count ?? 0) { await rebuild() }
     }
 
     /// The collection picker plus a one-line description of the current collection.
@@ -155,8 +170,8 @@ private struct SkyFigureRow: View {
             ConstellationFigure(polylines: figure.polylines, stars: [],
                                 lineColor: Theme.accent, lineWidth: 1, glow: false)
                 .frame(width: 64, height: 64)
-                .background(Circle().fill(.white.opacity(0.03)))
-                .overlay(Circle().strokeBorder(.white.opacity(0.08), lineWidth: 1))
+                .background { Circle().fill(.white.opacity(0.03)) }
+                .overlay { Circle().strokeBorder(.white.opacity(0.08), lineWidth: 1) }
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(figure.name)
@@ -182,30 +197,35 @@ private struct SkyFigureDetailView: View {
     @State private var show3D = false
 
     /// Catalog stars within the figure's patch of sky, brightest first, trimmed to
-    /// naked-eye visibility. Region-based (not constellation-keyed) so asterisms
-    /// that span several constellations still show their full star field.
-    private var stars: [FigureStar] {
-        guard let catalog = store.catalog else { return [] }
-        let region = SkyRegion(polylines: figure.polylines)
-        return catalog.stars
-            .filter { $0.apparentMagnitude <= 6.5 && region.contains($0.equatorial) }
-            .sorted { $0.apparentMagnitude < $1.apparentMagnitude }
-            .map { star in
-                FigureStar(
-                    point: SIMD2(star.equatorial.rightAscension.degrees,
-                                 star.equatorial.declination.degrees),
-                    magnitude: star.apparentMagnitude,
-                    color: StarColor.from(colorIndex: star.colorIndex),
-                    label: star.properName)
-            }
-    }
+    /// naked-eye visibility, plus the region's brightest star for the fact card.
+    /// Region-based (not constellation-keyed) so asterisms that span several
+    /// constellations still show their full star field. Computed ONCE off the main
+    /// actor in `.task` — as computed properties these were three full-catalog trig
+    /// scans per body evaluation.
+    @State private var stars: [FigureStar] = []
+    @State private var brightest: Star?
 
-    private var brightest: Star? {
-        guard let catalog = store.catalog else { return nil }
-        let region = SkyRegion(polylines: figure.polylines)
-        return catalog.stars
-            .filter { region.contains($0.equatorial) }
-            .min { $0.apparentMagnitude < $1.apparentMagnitude }
+    private func loadStars() async {
+        guard stars.isEmpty, let catalog = store.catalog else { return }
+        let figure = self.figure
+        let (found, brightest) = await Task.detached(priority: .userInitiated) { () -> ([FigureStar], Star?) in
+            let region = SkyRegion(polylines: figure.polylines)
+            let contained = catalog.stars.filter { region.contains($0.equatorial) }
+            let figureStars = contained
+                .filter { $0.apparentMagnitude <= 6.5 }
+                .sorted { $0.apparentMagnitude < $1.apparentMagnitude }
+                .map { star in
+                    FigureStar(
+                        point: SIMD2(star.equatorial.rightAscension.degrees,
+                                     star.equatorial.declination.degrees),
+                        magnitude: star.apparentMagnitude,
+                        color: StarColor.from(colorIndex: star.colorIndex),
+                        label: star.properName)
+                }
+            return (figureStars, contained.min { $0.apparentMagnitude < $1.apparentMagnitude })
+        }.value
+        stars = found
+        self.brightest = brightest
     }
 
     var body: some View {
@@ -224,6 +244,7 @@ private struct SkyFigureDetailView: View {
         .background(Theme.spaceGradient.ignoresSafeArea())
         .navigationTitle(figure.name)
         .navigationBarTitleDisplayMode(.inline)
+        .task(id: store.catalog?.count ?? 0) { await loadStars() }
         .fullScreenCover(isPresented: $show3D) {
             Constellation3DView(figure: figure, store: store)
                 .preferredColorScheme(.dark)
@@ -246,13 +267,16 @@ private struct SkyFigureDetailView: View {
                             lineColor: Theme.accent, lineWidth: 1.4, glow: true)
             .frame(height: 300)
             .frame(maxWidth: .infinity)
-            .background(
+            .background {
                 RoundedRectangle(cornerRadius: Theme.panelRadius)
                     .fill(LinearGradient(colors: [Color(red: 0.02, green: 0.03, blue: 0.09),
                                                   Color(red: 0.01, green: 0.01, blue: 0.04)],
-                                         startPoint: .top, endPoint: .bottom)))
-            .overlay(RoundedRectangle(cornerRadius: Theme.panelRadius)
-                .strokeBorder(.white.opacity(0.08), lineWidth: 1))
+                                         startPoint: .top, endPoint: .bottom))
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: Theme.panelRadius)
+                    .strokeBorder(.white.opacity(0.08), lineWidth: 1)
+            }
             .clipShape(RoundedRectangle(cornerRadius: Theme.panelRadius))
     }
 
@@ -268,38 +292,22 @@ private struct SkyFigureDetailView: View {
 
     private var factCard: some View {
         VStack(spacing: 0) {
-            DetailFactRow("Collection", figure.catalog.heading)
-            if let genitive = figure.genitive { DetailFactRow("Genitive", genitive) }
-            DetailFactRow(figure.catalog == .constellations ? "Family" : "Group", figure.group)
+            DetailRow("Collection", figure.catalog.heading)
+            if let genitive = figure.genitive { DetailRow("Genitive", genitive) }
+            DetailRow(figure.catalog == .constellations ? "Family" : "Group", figure.group)
             if let hemisphere = figure.hemisphere {
-                DetailFactRow("Hemisphere", hemisphere.rawValue)
+                DetailRow("Hemisphere", hemisphere.rawValue)
             }
             if let b = brightest {
-                DetailFactRow("Brightest star", StarFacts.displayName(for: b)
+                DetailRow("Brightest star", StarFacts.displayName(for: b)
                     + String(format: " · mag %.1f", b.apparentMagnitude))
             }
-            DetailFactRow("Stars in view", "\(stars.count) to naked eye")
+            DetailRow("Stars in view", "\(stars.count) to naked eye")
         }
         .luminousSurface(Theme.accent)
     }
 }
 
-private struct DetailFactRow: View {
-    let label: String
-    let value: String
-    init(_ label: String, _ value: String) { self.label = label; self.value = value }
-
-    var body: some View {
-        HStack {
-            Text(label).foregroundStyle(.white.opacity(0.6))
-            Spacer()
-            Text(value).foregroundStyle(.white).multilineTextAlignment(.trailing)
-        }
-        .font(.subheadline)
-        .padding(.horizontal, 14).padding(.vertical, 11)
-        .overlay(Divider().background(.white.opacity(0.08)), alignment: .bottom)
-    }
-}
 
 /// The patch of sky a figure occupies: a centre direction and an angular radius
 /// covering all its vertices (plus a margin). Used to pull just the nearby catalog

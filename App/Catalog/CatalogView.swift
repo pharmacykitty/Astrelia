@@ -11,6 +11,7 @@ struct CatalogView: View {
     let exo: ExoplanetStore
     @State private var query = ""
     @State private var allStars: [Star] = []           // every catalog star, brightest first
+    @State private var searchKeys: [String] = []        // lowercase haystack per star, aligned with allStars
     @State private var namedStars: [Star] = []          // the curated "greatest hits"
     @State private var constellationGroups: [ConstellationGroup] = []
     /// Which dropdowns are open. Search overrides this to expand all (see `binding`).
@@ -24,6 +25,45 @@ struct CatalogView: View {
     }
 
     var body: some View {
+        ZStack {
+            Theme.spaceGradient.ignoresSafeArea()
+            list
+        }
+        .navigationTitle("Catalog")
+        .navigationBarTitleDisplayMode(.inline)
+        .safeAreaInset(edge: .bottom) {
+            LuminousSearchField(query: $query, prompt: "Search stars, planets, nebulae…")
+        }
+        .task(id: store.catalog?.count ?? 0) {
+            guard allStars.isEmpty, let catalog = store.catalog else { return }
+            // Sorting + bucketing 109k stars (and building their search keys) is a
+            // guaranteed first-open hitch on the main actor — compute it off.
+            let built = await Task.detached(priority: .userInitiated) {
+                () -> (all: [Star], keys: [String], named: [Star], groups: [ConstellationGroup]) in
+                let sorted = catalog.stars.sorted { $0.apparentMagnitude < $1.apparentMagnitude }
+                let keys = sorted.map { StarFacts.searchKey(for: $0) }
+                let named = sorted.filter { $0.properName != nil }
+
+                // Bucket every star by its constellation so the whole catalog is
+                // browsable, not just the named handful. Sorted by full name.
+                var buckets: [String: [Star]] = [:]
+                for star in sorted { buckets[star.constellation ?? "", default: []].append(star) }
+                let groups = buckets.map { code, stars in
+                    ConstellationGroup(id: code.isEmpty ? "—" : code,
+                                       name: StarFacts.constellationName(code) ?? (code.isEmpty ? "Unlisted" : code),
+                                       stars: stars)
+                }
+                .sorted { $0.name < $1.name }
+                return (sorted, keys, named, groups)
+            }.value
+            allStars = built.all
+            searchKeys = built.keys
+            namedStars = built.named
+            constellationGroups = built.groups
+        }
+    }
+
+    private var list: some View {
         List {
             if isSearching {
                 let matches = matchingStars
@@ -79,57 +119,8 @@ struct CatalogView: View {
                 }
             }
         }
-        .navigationTitle("Catalog")
-        .navigationBarTitleDisplayMode(.inline)
-        .safeAreaInset(edge: .bottom) { searchBar }
-        .task(id: store.catalog?.count ?? 0) {
-            guard allStars.isEmpty, let catalog = store.catalog else { return }
-            let sorted = catalog.stars.sorted { $0.apparentMagnitude < $1.apparentMagnitude }
-            allStars = sorted
-            namedStars = sorted.filter { $0.properName != nil }
-
-            // Bucket every star by its constellation so the whole catalog is
-            // browsable, not just the named handful. Sorted by full name.
-            var buckets: [String: [Star]] = [:]
-            for star in sorted { buckets[star.constellation ?? "", default: []].append(star) }
-            constellationGroups = buckets.map { code, stars in
-                ConstellationGroup(id: code.isEmpty ? "—" : code,
-                                   name: StarFacts.constellationName(code) ?? (code.isEmpty ? "Unlisted" : code),
-                                   stars: stars)
-            }
-            .sorted { $0.name < $1.name }
-        }
-    }
-
-    // MARK: Search
-
-    /// A custom search field pinned to the bottom of the screen (so it sits in
-    /// thumb reach), in the app's luminous language and without the system search's
-    /// magnifying-glass affordance.
-    private var searchBar: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "sparkle")
-                .font(.footnote)
-                .foregroundStyle(Theme.accent.opacity(0.8))
-            TextField("Search stars, planets, nebulae…", text: $query)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .submitLabel(.search)
-            if !query.isEmpty {
-                Button {
-                    query = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Clear search")
-            }
-        }
-        .padding(.horizontal, 16).padding(.vertical, 12)
-        .background(.ultraThinMaterial, in: Capsule())
-        .overlay(Capsule().strokeBorder(.white.opacity(0.14), lineWidth: 0.5))
-        .padding(.horizontal)
-        .padding(.bottom, 6)
+        .scrollContentBackground(.hidden)
+        .tint(Theme.accent)
     }
 
     // MARK: Dropdown
@@ -158,6 +149,9 @@ struct CatalogView: View {
                         .frame(width: 30)
                 }
             }
+            // The luminous row treatment shared with ConstellationsView, so the
+            // two browse screens live in the same visual world.
+            .listRowBackground(Color.white.opacity(0.04))
         }
     }
 
@@ -175,10 +169,16 @@ struct CatalogView: View {
     private var isSearching: Bool { !trimmedQuery.isEmpty }
 
     /// All stars matching the query, brightest first, capped so a broad query (e.g.
-    /// a single constellation) stays snappy to render.
+    /// a single constellation) stays snappy to render. Filters the prebuilt
+    /// lowercase keys — no per-star string allocation on the keystroke path.
     private var matchingStars: [Star] {
         let q = trimmedQuery
-        return Array(allStars.lazy.filter { StarFacts.matches($0, query: q) }.prefix(400))
+        var result: [Star] = []
+        for (index, key) in searchKeys.enumerated() where key.contains(q) {
+            result.append(allStars[index])
+            if result.count == 400 { break }
+        }
+        return result
     }
 
     private func filteredLandmarks(in group: LandmarkGroup) -> [Landmark] {
@@ -243,9 +243,12 @@ struct CatalogView: View {
         DeepSkyObject.Kind.allCases.filter { kind in filteredDeepSky.contains { $0.kind == kind } }
     }
 
+    /// The deep-sky list is static — sort it once, not on every body evaluation.
+    private static let sortedDeepSky = DeepSky.all.sorted { ($0.magnitude ?? 99) < ($1.magnitude ?? 99) }
+
     /// All deep-sky objects (brightest first), filtered by the search query.
     private var filteredDeepSky: [DeepSkyObject] {
-        let all = DeepSky.all.sorted { ($0.magnitude ?? 99) < ($1.magnitude ?? 99) }
+        let all = Self.sortedDeepSky
         guard isSearching else { return all }
         let q = trimmedQuery
         return all.filter {
@@ -508,20 +511,3 @@ private struct DetailScaffold<Facts: View, Description: View, Action: View>: Vie
     }
 }
 
-private struct DetailRow: View {
-    let label: String
-    let value: String
-    init(_ label: String, _ value: String) { self.label = label; self.value = value }
-
-    var body: some View {
-        HStack {
-            Text(label).foregroundStyle(.white.opacity(0.6))
-            GlossaryButton(label: label)
-            Spacer()
-            Text(value).foregroundStyle(.white).multilineTextAlignment(.trailing)
-        }
-        .font(.subheadline)
-        .padding(.horizontal, 14).padding(.vertical, 11)
-        .overlay(Divider().background(.white.opacity(0.08)), alignment: .bottom)
-    }
-}

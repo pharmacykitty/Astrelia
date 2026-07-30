@@ -103,16 +103,9 @@ struct PlanetDetailView: View {
 
     // MARK: Helpers
 
+    /// The shared fact row, under its old local name so the call sites read the same.
     private func row(_ label: String, _ value: String) -> some View {
-        HStack {
-            Text(label).foregroundStyle(.white.opacity(0.6))
-            GlossaryButton(label: label)
-            Spacer()
-            Text(value).foregroundStyle(.white).multilineTextAlignment(.trailing)
-        }
-        .font(.subheadline)
-        .padding(.horizontal, 14).padding(.vertical, 11)
-        .overlay(Divider().background(.white.opacity(0.08)), alignment: .bottom)
+        DetailRow(label, value)
     }
 
     private func periodText(_ p: Double) -> String {

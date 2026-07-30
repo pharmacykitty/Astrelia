@@ -39,22 +39,5 @@ func worldDirection(azimuth: Angle, altitude: Angle) -> SIMD3<Double> {
     )
 }
 
-/// Gnomonic projection of a world direction onto the screen, given the camera basis
-/// and a vertical field of view. Returns `nil` when the point is behind the camera.
-func projectToScreen(
-    direction: SIMD3<Double>,
-    basis: CameraBasis,
-    viewSize: CGSize,
-    verticalFOV: Angle
-) -> CGPoint? {
-    let forward = simd_dot(direction, basis.forward)
-    guard forward > 0.06 else { return nil }   // behind / at the very edge
-
-    let rightward = simd_dot(direction, basis.right)
-    let upward = simd_dot(direction, basis.up)
-
-    let focalLength = Double(viewSize.height) / 2.0 / tan(verticalFOV.radians / 2.0)
-    let x = Double(viewSize.width) / 2.0 + (rightward / forward) * focalLength
-    let y = Double(viewSize.height) / 2.0 - (upward / forward) * focalLength
-    return CGPoint(x: x, y: y)
-}
+// (The old free-function `projectToScreen` was deleted 2026-07-28: it had no call
+// sites — `SkyCamera.motion` carries the live gnomonic projection.)

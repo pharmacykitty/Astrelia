@@ -1,11 +1,12 @@
 import Foundation
 import simd
+import Synchronization
 
 /// A baked particle cloud for a deep-sky landmark — the positions + colours produced
 /// offline by `tools/nebula_bake.py` from a public-domain photo, so the object renders
 /// in its true shape using our additive sprites. Coordinates are normalised to
 /// [-1, 1] (y up); the renderer places the sheet facing Earth and synthesises depth.
-struct NebulaParticleSet {
+struct NebulaParticleSet: Sendable {
     let gas: [(pos: SIMD2<Float>, color: SIMD3<Float>)]
     let dust: [SIMD2<Float>]
 }
@@ -47,9 +48,20 @@ enum NebulaLibrary {
         "california": "california", // California Nebula
     ]
 
+    /// Parsed datasets, kept for the app's lifetime (~25 MB when all 27 are loaded)
+    /// so scene rebuilds never re-read or re-parse the bundle. Failed loads cache
+    /// `nil` too, so a missing/corrupt file isn't re-attempted. A `Mutex` rather
+    /// than `@MainActor` so scene builders can run off the main actor.
+    private static let cache = Mutex<[String: NebulaParticleSet?]>([:])
+
     static func model(for landmarkID: String) -> NebulaParticleSet? {
         guard let name = baked[landmarkID] else { return nil }
-        return load(name)
+        return cache.withLock { cache in
+            if let cached = cache[name] { return cached }
+            let parsed = load(name)
+            cache[name] = .some(parsed)
+            return parsed
+        }
     }
 
     private static func load(_ name: String) -> NebulaParticleSet? {

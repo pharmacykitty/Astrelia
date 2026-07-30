@@ -20,7 +20,12 @@ struct ContentView: View {
     @State private var arController = ARCameraController()
     @State private var filters = SkyFilters()
     @State private var showFilters = false
-    @State private var showMenu = false
+    // The destination dock (replaces the old full-screen menu): list screens
+    // present as sheets over the live sky; the Galaxy Map is the one full-screen
+    // immersion. The sky is the app — everything else is an overlay.
+    @State private var dockExpanded = ProcessInfo.processInfo.arguments.contains("-dockOpen")   // debug: snapshot the dock
+    @State private var shownSheet: AppScreen?
+    @State private var showGalaxyMap = false
     @State private var uiRotation = 0.0   // chrome rotation (degrees) to stay upright as the phone tilts
     @Environment(\.openURL) private var openURL
 
@@ -51,6 +56,11 @@ struct ContentView: View {
     @State private var manuallyCalibrated = false
     @State private var autoSeeded = false
     @State private var lastSkyRefresh = Date.distantPast   // throttles the full star rebuild
+    @State private var skyRefreshTask: Task<Void, Never>?  // in-flight off-main refresh (newest wins)
+    /// Sun/Moon equatorial positions from the last calm refresh. They drift
+    /// arcseconds over 1.5 s, so the per-frame cost of the luminaries is just a
+    /// horizontal transform + projection — not the full Meeus/ELP series at 120 Hz.
+    @State private var solarEphemeris: SolarEphemeris?
     @State private var calibrating = false
     @State private var calibrationOptions: [CalibrationOption] = []
     @State private var calibrationTarget = "Sun"
@@ -67,8 +77,9 @@ struct ContentView: View {
 
                 // Only the fast-moving sky lives in TimelineView (rebuilt every frame).
                 // Interactive controls are kept OUT of it, else the 60fps rebuilds
-                // cancel their taps (the mode toggle wouldn't switch).
-                TimelineView(.animation) { timeline in
+                // cancel their taps (the mode toggle wouldn't switch). Paused while
+                // a destination covers the sky, so nothing renders invisibly.
+                TimelineView(.animation(minimumInterval: nil, paused: covered)) { timeline in
                     let camera = makeSkyCamera(size: size)
                     let effectiveFOV = mode == .virtual ? fieldOfView : 55.0
                     ZStack {
@@ -113,7 +124,7 @@ struct ContentView: View {
             provider.start()
             store.loadIfNeeded()
             exoStore.loadIfNeeded()
-            // The full-screen menu makes this view disappear (pausing the sensors);
+            // The Galaxy Map cover makes this view disappear (pausing the sensors);
             // on return, resume the AR session too if we're in AR mode.
             if mode == .ar { arController.start() }
         }
@@ -136,7 +147,7 @@ struct ContentView: View {
                 // The star field's horizontal coordinates drift on the sidereal
                 // timescale, so rebuilding the whole catalog 5×/s is wasteful — the
                 // per-frame motion is handled by the Canvas projection. Refresh calmly.
-                if Date().timeIntervalSince(lastSkyRefresh) > 1.5 {
+                if !covered, Date().timeIntervalSince(lastSkyRefresh) > 1.5 {
                     refreshSky()
                     lastSkyRefresh = Date()
                 }
@@ -147,8 +158,45 @@ struct ContentView: View {
             FilterSheet(filters: $filters, catalog: store.catalog)
                 .presentationDetents([.medium, .large])
         }
-        .fullScreenCover(isPresented: $showMenu) {
-            MoreMenuView(store: store, exo: exoStore)
+        .sheet(item: $shownSheet) { screen in
+            NavigationStack {
+                destinationView(screen)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            CircleIconButton(label: "Close", systemImage: "xmark") { shownSheet = nil }
+                        }
+                    }
+            }
+            .preferredColorScheme(.dark)
+        }
+        .fullScreenCover(isPresented: $showGalaxyMap) {
+            GalaxyMapView(store: store, exo: exoStore)
+                .preferredColorScheme(.dark)
+        }
+        // Sheets don't fire onDisappear, so pause the sensors by hand while one
+        // covers the sky (the camera especially must not stay live behind it).
+        .onChange(of: shownSheet == nil) { _, uncovered in
+            if uncovered {
+                provider.start()
+                if mode == .ar { arController.start() }
+            } else {
+                provider.stop()
+                arController.stop()
+            }
+        }
+    }
+
+    /// Whether a destination currently covers the sky.
+    private var covered: Bool { shownSheet != nil || showGalaxyMap }
+
+    @ViewBuilder
+    private func destinationView(_ screen: AppScreen) -> some View {
+        switch screen {
+        case .tonight: TonightView()
+        case .catalog: CatalogView(store: store, exo: exoStore)
+        case .constellations: ConstellationsView(store: store)
+        case .galaxyMap: EmptyView()   // presented as a full-screen cover instead
+        case .about: AboutView()
         }
     }
 
@@ -276,8 +324,7 @@ struct ContentView: View {
     // MARK: Chrome
 
     private var background: some View {
-        LinearGradient(colors: [Color(red: 0.02, green: 0.03, blue: 0.12), .black],
-                       startPoint: .top, endPoint: .bottom)
+        Theme.spaceGradient
     }
 
     private var reticle: some View {
@@ -340,7 +387,7 @@ struct ContentView: View {
                 }
             }
             .padding(28)
-            .luminousSurface(Theme.accent, cornerRadius: 24, glow: 16)
+            .luminousSurface(Theme.accent, cornerRadius: Theme.panelRadius, glow: 16)
             .padding(40)
         }
     }
@@ -354,13 +401,19 @@ struct ContentView: View {
         let landscape = quadrant == 1 || quadrant == 3
         return VStack(spacing: 12) {
             controlBar
-            if let selection { selectionCard(selection) }
-            if showTimeScrubber { timeScrubber() }
-            if mode == .ar { calibrationBar() }
+            if let selection { selectionCard(selection).transition(Theme.slide(from: .top)) }
+            if showTimeScrubber { timeScrubber().transition(Theme.slide(from: .top)) }
+            if mode == .ar { calibrationBar().transition(Theme.slide(from: .top)) }
 
             Spacer(minLength: 0)
 
-            if filters.showStars && filters.showColourKey { StarColorLegend() }
+            if filters.showStars && filters.showColourKey {
+                StarColorLegend().transition(Theme.slide(from: .bottom))
+            }
+
+            if dockExpanded {
+                destinationDock.transition(Theme.slide(from: .bottom))
+            }
 
             // Live readout, refreshed calmly (kept out of the 60fps render loop).
             TimelineView(.periodic(from: .now, by: 0.25)) { _ in
@@ -371,6 +424,9 @@ struct ContentView: View {
         .padding(.horizontal)
         .padding(.top, edgeInset(quadrant, safe) + 8)
         .padding(.bottom, edgeInset((quadrant + 2) % 4, safe) + 6)
+        // The legend is toggled from the filter sheet, so its show/hide can't be
+        // wrapped in `withAnimation` at the mutation site — animate on the value.
+        .animation(Theme.spring, value: filters.showStars && filters.showColourKey)
         // Lay the chrome out in a frame matching the *rotated* screen, then spin the
         // whole thing: the controls stay pinned to the physical top edge and the
         // readout to the physical bottom, hugging whichever way the phone is tilted.
@@ -382,9 +438,11 @@ struct ContentView: View {
 
     private var controlBar: some View {
         HStack(spacing: 12) {
-            CircleIconButton(label: "Menu", systemImage: "square.grid.2x2") { showMenu = true }
+            CircleIconButton(label: "Menu", systemImage: "square.grid.2x2", isActive: dockExpanded) {
+                withAnimation(Theme.spring) { dockExpanded.toggle() }
+            }
             Spacer()
-            Picker("Mode", selection: $mode) {
+            Picker("Mode", selection: $mode.animation(Theme.spring)) {
                 Text("Sky").tag(SkyMode.virtual)
                 Text("AR").tag(SkyMode.ar)
             }
@@ -394,9 +452,50 @@ struct ContentView: View {
             Spacer()
             CircleIconButton(label: "Time travel", systemImage: isTimeShifted ? "clock.arrow.2.circlepath" : "clock",
                              tint: .cyan, isActive: showTimeScrubber || isTimeShifted) {
-                withAnimation { showTimeScrubber.toggle() }
+                withAnimation(Theme.spring) { showTimeScrubber.toggle() }
             }
             CircleIconButton(label: "Sky filters", systemImage: "slider.horizontal.3") { showFilters = true }
+        }
+    }
+
+    /// The destination dock: the app's places in one glass capsule over the sky.
+    private var destinationDock: some View {
+        HStack(spacing: 6) {
+            ForEach(AppScreen.allCases) { screen in
+                Button {
+                    withAnimation(Theme.spring) { dockExpanded = false }
+                    open(screen)
+                } label: {
+                    VStack(spacing: 5) {
+                        Image(systemName: screen.symbol)
+                            .font(.system(size: 19, weight: .medium))
+                            .foregroundStyle(screen.tint)
+                            .frame(width: 42, height: 42)
+                            .background { Circle().fill(.white.opacity(0.06)) }
+                            .overlay { Circle().strokeBorder(screen.tint.opacity(0.4), lineWidth: 1) }
+                        Text(screen.title)
+                            .font(.caption2)
+                            .foregroundStyle(Theme.textSecondary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(screen.title)
+                .accessibilityHint(screen.subtitle)
+            }
+        }
+        .padding(.horizontal, 10).padding(.vertical, 10)
+        .luminousSurface(Theme.accent, cornerRadius: Theme.panelRadius, glow: 8)
+    }
+
+    private func open(_ screen: AppScreen) {
+        if screen == .galaxyMap {
+            showGalaxyMap = true
+        } else {
+            shownSheet = screen
         }
     }
 
@@ -406,9 +505,12 @@ struct ContentView: View {
             HStack {
                 Label(timeOffsetLabel, systemImage: "clock")
                     .font(.caption.monospacedDigit()).foregroundStyle(.white)
+                    // Digits roll as the scrubber steps instead of flickering.
+                    .contentTransition(.numericText())
+                    .animation(Theme.spring, value: timeOffsetLabel)
                 Spacer()
                 if isTimeShifted {
-                    Button("Now") { withAnimation { timeOffset = 0 }; refreshSky() }
+                    Button("Now") { withAnimation(Theme.spring) { timeOffset = 0 }; refreshSky() }
                         .font(.caption.weight(.semibold)).foregroundStyle(Theme.accent)
                 }
             }
@@ -418,7 +520,7 @@ struct ContentView: View {
             .tint(.cyan)
         }
         .padding(10)
-        .luminousSurface(.cyan, cornerRadius: 22, glow: 8)
+        .luminousSurface(.cyan, cornerRadius: Theme.panelRadius, glow: 8)
     }
 
     /// "Live · Sat 21:14" when at the present instant, otherwise the shifted clock
@@ -456,14 +558,16 @@ struct ContentView: View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(selection.title).font(.headline).foregroundStyle(.white)
-                Text(selection.subtitle).font(.caption).foregroundStyle(.white.opacity(0.6))
+                Text(selection.subtitle).font(.caption).foregroundStyle(Theme.textSecondary)
                 if let detail = selection.detail {
-                    Text(detail).font(.caption2).foregroundStyle(.white.opacity(0.5))
+                    // The densest line on the card — kept at .caption + secondary,
+                    // not caption2/0.5, so the payload isn't the hardest bit to read.
+                    Text(detail).font(.caption).foregroundStyle(Theme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
             Spacer()
-            Button { self.selection = nil } label: {
+            Button { withAnimation(Theme.spring) { self.selection = nil } } label: {
                 Image(systemName: "xmark.circle.fill")
                     .font(.title3)
                     .foregroundStyle(.white.opacity(0.5))
@@ -493,12 +597,13 @@ struct ContentView: View {
                 }
                 Spacer()
                 Button("Align") { alignCalibration() }.buttonStyle(LuminousButtonStyle())
-                Button("Cancel") { calibrating = false }.foregroundStyle(.white.opacity(0.7))
+                Button("Cancel") { withAnimation(Theme.spring) { calibrating = false } }
+                    .foregroundStyle(Theme.textSecondary)
             }
-            .padding(8).luminousSurface(Theme.accent, cornerRadius: 26, glow: 8)
+            .padding(8).luminousSurface(Theme.accent, cornerRadius: Theme.panelRadius, glow: 8)
         } else {
             HStack(spacing: 12) {
-                Button { startCalibration() } label: {
+                Button { withAnimation(Theme.spring) { startCalibration() } } label: {
                     Label("Calibrate", systemImage: "scope").font(.subheadline)
                 }
                 if manuallyCalibrated {
@@ -507,9 +612,9 @@ struct ContentView: View {
                         manuallyCalibrated = false
                         autoSeeded = false
                     }
-                    .font(.caption).foregroundStyle(.white.opacity(0.7))
+                    .font(.caption).foregroundStyle(Theme.textSecondary)
                 } else {
-                    Text("auto · tap to refine").font(.caption).foregroundStyle(.white.opacity(0.55))
+                    Text("auto · tap to refine").font(.caption).foregroundStyle(Theme.textTertiary)
                 }
             }
             .padding(10).background(.ultraThinMaterial, in: .capsule)
@@ -528,14 +633,14 @@ struct ContentView: View {
                 Text(String(format: "Pointing  %@ %.0f°  ·  alt %+.0f°",
                             compass(state.pointing.azimuth),
                             state.pointing.azimuth.degrees, state.pointing.altitude.degrees))
-                    .font(.caption.monospacedDigit()).foregroundStyle(.white.opacity(0.7))
+                    .font(.caption.monospacedDigit()).foregroundStyle(Theme.textSecondary)
             } else {
                 Text(statusMessage).font(.callout).multilineTextAlignment(.center)
                     .foregroundStyle(.white.opacity(0.85))
             }
         }
         .padding(14)
-        .background(.black.opacity(0.35), in: RoundedRectangle(cornerRadius: 16))
+        .quietSurface()
     }
 
     private func bodyRow(_ body: ProjectedBody) -> some View {
@@ -545,7 +650,7 @@ struct ContentView: View {
             Text(body.name).font(.subheadline.weight(.medium)).foregroundStyle(.white)
             Spacer()
             Text(String(format: "az %.0f° alt %+.0f°", body.azimuth.degrees, body.altitude.degrees))
-                .font(.caption.monospacedDigit()).foregroundStyle(.white.opacity(0.5))
+                .font(.caption.monospacedDigit()).foregroundStyle(Theme.textTertiary)
             Text(inView ? "● here" : turnHint(body))
                 .font(.caption.monospacedDigit().weight(.semibold))
                 .foregroundStyle(inView ? .green : .white.opacity(0.85))
@@ -556,8 +661,10 @@ struct ContentView: View {
     // MARK: Gestures
 
     private var zoomGesture: some Gesture {
-        MagnificationGesture()
-            .onChanged { value in if mode == .virtual { fieldOfView = min(95, max(18, zoomAnchor / value)) } }
+        MagnifyGesture()
+            .onChanged { value in
+                if mode == .virtual { fieldOfView = min(95, max(18, zoomAnchor / value.magnification)) }
+            }
             .onEnded { _ in zoomAnchor = fieldOfView }
     }
 
@@ -573,10 +680,12 @@ struct ContentView: View {
             let distance = hypot(point.x - location.x, point.y - location.y)
             if distance < 30, best == nil || distance < best!.distance { best = (distance, star.id) }
         }
-        if let best, let star = catalog.star(id: best.id) {
-            selection = StarSelection(star: star)
-        } else {
-            selection = nil
+        withAnimation(Theme.spring) {
+            if let best, let star = catalog.star(id: best.id) {
+                selection = StarSelection(star: star)
+            } else {
+                selection = nil
+            }
         }
     }
 
@@ -594,6 +703,7 @@ struct ContentView: View {
     }
 
     private func solarState(camera: SkyCamera, size: CGSize, date: Date) -> SolarState? {
+        guard let ephemeris = solarEphemeris else { return nil }
         guard let latitude = provider.latitude, let longitude = provider.longitude else { return nil }
         let location = GeographicLocation(latitude: .degrees(latitude), longitude: .degrees(longitude))
         let jd = JulianDay(date)
@@ -616,11 +726,13 @@ struct ContentView: View {
             )
         }
 
+        // Equatorial positions come from the 1.5 s refresh cache (the Moon's is
+        // already topocentric — parallax corrected for the observer); only the
+        // time-sensitive horizontal transform runs at frame rate, so the sky's
+        // sidereal rotation stays per-frame smooth under the time scrubber.
         return SolarState(pointing: pointing, bodies: [
-            make("Sun", .orange, 24, 26, Sun.position(at: jd)),
-            // The Moon is close enough that topocentric parallax shifts it up to ~1°
-            // from its geocentric position — correct it for the observer's location.
-            make("Moon", Color(white: 0.92), 20, 18, Moon.topocentric(at: jd, observer: location)),
+            make("Sun", .orange, 24, 26, ephemeris.sun),
+            make("Moon", Color(white: 0.92), 20, 18, ephemeris.moon),
         ])
     }
 
@@ -629,10 +741,48 @@ struct ContentView: View {
             if !starField.isEmpty { starField = [] }
             if !constellationPaths.isEmpty { constellationPaths = [] }
             if !eclipticPoints.isEmpty { eclipticPoints = []; planetGlyphs = [] }
+            solarEphemeris = nil
             return
         }
         let location = GeographicLocation(latitude: .degrees(latitude), longitude: .degrees(longitude))
         let jd = JulianDay(shifted(Date()))
+        let filters = self.filters
+        let catalog = store.catalog
+        let constellations = store.constellations
+        // The full-catalog transform + sort is far too heavy to run synchronously
+        // under a display-rate Canvas — compute off the main actor and assign the
+        // finished field back. A newer refresh cancels an in-flight one.
+        skyRefreshTask?.cancel()
+        skyRefreshTask = Task {
+            let sky = await Task.detached(priority: .userInitiated) {
+                Self.computeSky(filters: filters, catalog: catalog,
+                                constellations: constellations, location: location, jd: jd)
+            }.value
+            guard !Task.isCancelled else { return }
+            starField = sky.starField
+            constellationPaths = sky.constellationPaths
+            eclipticPoints = sky.eclipticPoints
+            planetGlyphs = sky.planetGlyphs
+            solarEphemeris = sky.ephemeris
+        }
+    }
+
+    /// Everything `refreshSky` derives on the calm cadence, computed off-main.
+    private struct SkyData: Sendable {
+        var starField: [StarPoint] = []
+        var constellationPaths: [ConstellationPath] = []
+        var eclipticPoints: [SIMD3<Double>] = []
+        var planetGlyphs: [SkyGlyph] = []
+        var ephemeris: SolarEphemeris
+    }
+
+    nonisolated private static func computeSky(filters: SkyFilters, catalog: StarCatalog?,
+                                               constellations: [Constellation],
+                                               location: GeographicLocation, jd: JulianDay) -> SkyData {
+        // The Moon is close enough that topocentric parallax shifts it up to ~1°
+        // from its geocentric position — correct it for the observer's location.
+        var sky = SkyData(ephemeris: SolarEphemeris(sun: Sun.position(at: jd),
+                                                    moon: Moon.topocentric(at: jd, observer: location)))
 
         func toWorld(raDegrees: Double, decDegrees: Double) -> SIMD3<Double> {
             let horizon = CoordinateTransform.horizontal(
@@ -641,7 +791,7 @@ struct ContentView: View {
             return worldDirection(azimuth: horizon.azimuth, altitude: horizon.altitude)
         }
 
-        if filters.showStars, let catalog = store.catalog {
+        if filters.showStars, let catalog {
             let limit = filters.magnitudeLimit
             let includeBelow = filters.showBelowHorizon
             var points: [StarPoint] = []
@@ -657,13 +807,11 @@ struct ContentView: View {
                     label: star.properName ?? star.bayerFlamsteed))
             }
             points.sort { $0.magnitude < $1.magnitude }
-            starField = points
-        } else if !starField.isEmpty {
-            starField = []
+            sky.starField = points
         }
 
         if filters.showConstellations {
-            constellationPaths = store.constellations.map { constellation in
+            sky.constellationPaths = constellations.map { constellation in
                 var sum = SIMD3<Double>(0, 0, 0)
                 var count = 0.0
                 let polylines = constellation.polylines.map { line -> [SIMD3<Double>] in
@@ -676,8 +824,6 @@ struct ContentView: View {
                 let centroid = count > 0 ? simd_normalize(sum / count) : SIMD3<Double>(0, 0, 1)
                 return ConstellationPath(id: constellation.id, polylines: polylines, labelDirection: centroid)
             }
-        } else if !constellationPaths.isEmpty {
-            constellationPaths = []
         }
 
         if filters.showEcliptic {
@@ -691,25 +837,25 @@ struct ContentView: View {
             }
 
             // The ecliptic, sampled every 3° around the full circle.
-            eclipticPoints = stride(from: 0.0, through: 360.0, by: 3.0).map { direction(eclipticLongitude: $0) }
+            sky.eclipticPoints = stride(from: 0.0, through: 360.0, by: 3.0).map { direction(eclipticLongitude: $0) }
 
             // The live planets at their true positions on the sky.
-            planetGlyphs = Planet.allCases.map { planet in
+            sky.planetGlyphs = Planet.allCases.map { planet in
                 let horizon = CoordinateTransform.horizontal(Planets.position(planet, at: jd), at: location, time: jd)
                 return SkyGlyph(direction: worldDirection(azimuth: horizon.azimuth, altitude: horizon.altitude),
-                                symbol: Self.planetSymbol(planet), name: Self.planetName(planet),
-                                color: Self.planetColor(planet))
+                                symbol: planetSymbol(planet), name: planetName(planet),
+                                color: planetColor(planet))
             }
-        } else if !eclipticPoints.isEmpty {
-            eclipticPoints = []; planetGlyphs = []
         }
+
+        return sky
     }
 
     // MARK: Ecliptic overlay helpers
 
     static let eclipticGold = Color(red: 1.0, green: 0.84, blue: 0.45)
 
-    private static func planetSymbol(_ p: Planet) -> String {
+    nonisolated private static func planetSymbol(_ p: Planet) -> String {
         // Append U+FE0E so ♀/♂ render as line-art, never colour emoji (see CLAUDE.md).
         let base: String
         switch p {
@@ -719,14 +865,14 @@ struct ContentView: View {
         return base + "\u{FE0E}"
     }
 
-    private static func planetName(_ p: Planet) -> String {
+    nonisolated private static func planetName(_ p: Planet) -> String {
         switch p {
         case .mercury: "Mercury"; case .venus: "Venus"; case .mars: "Mars"; case .jupiter: "Jupiter"
         case .saturn: "Saturn"; case .uranus: "Uranus"; case .neptune: "Neptune"; case .pluto: "Pluto"
         }
     }
 
-    private static func planetColor(_ p: Planet) -> Color {
+    nonisolated private static func planetColor(_ p: Planet) -> Color {
         switch p {
         case .mercury: Color(white: 0.82)
         case .venus: Color(red: 1.0, green: 0.92, blue: 0.72)
@@ -808,7 +954,7 @@ struct ContentView: View {
         let degrees = atan2(gravity.x, -gravity.y) * 180 / .pi
         let target = -((degrees / 90).rounded() * 90)
         if abs(signedDelta(target - uiRotation)) > 1 {
-            withAnimation(.spring(duration: 0.35)) { uiRotation = target }
+            withAnimation(Theme.spring) { uiRotation = target }
         }
     }
 
@@ -863,7 +1009,7 @@ struct ContentView: View {
 
     private func starRadius(_ magnitude: Double) -> Double { max(0.6, (6.6 - magnitude) * 0.45) }
 
-    private func starColor(_ colorIndex: Double?) -> Color {
+    nonisolated private static func starColor(_ colorIndex: Double?) -> Color {
         guard let ci = colorIndex else { return .white }
         switch ci {
         case ..<0.0: return Color(red: 0.70, green: 0.80, blue: 1.0)
@@ -920,6 +1066,13 @@ private struct ProjectedBody: Identifiable {
 private struct SolarState {
     let pointing: (azimuth: Angle, altitude: Angle)
     let bodies: [ProjectedBody]
+}
+
+/// The luminaries' equatorial positions from the last calm refresh (the Moon's
+/// already topocentric). See `ContentView.solarEphemeris` for why they're cached.
+private struct SolarEphemeris: Sendable {
+    let sun: EquatorialCoordinates
+    let moon: EquatorialCoordinates
 }
 
 private struct CalibrationOption: Identifiable {

@@ -59,15 +59,14 @@ struct HRDiagramView: View {
                 }
             }
             .frame(height: 170)
-            .background(.black.opacity(0.25), in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.white.opacity(0.10), lineWidth: 0.5))
+            .quietSurface()
 
             HStack {
-                Text("← hotter").font(.caption2).foregroundStyle(.white.opacity(0.45))
+                Text("← hotter").font(.caption2).foregroundStyle(Theme.textTertiary)
                 Spacer()
-                Text("more luminous ↑").font(.caption2).foregroundStyle(.white.opacity(0.45))
+                Text("more luminous ↑").font(.caption2).foregroundStyle(Theme.textTertiary)
                 Spacer()
-                Text("cooler →").font(.caption2).foregroundStyle(.white.opacity(0.45))
+                Text("cooler →").font(.caption2).foregroundStyle(Theme.textTertiary)
             }
         }
     }
@@ -116,14 +115,13 @@ struct StarSizeView: View {
                      color: TemperatureColor.color(forKelvin: temperatureK ?? 4_000))
             }
             .frame(height: 150)
-            .background(.black.opacity(0.25), in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.white.opacity(0.10), lineWidth: 0.5))
+            .quietSurface()
 
             HStack {
                 Text("Sun · 1 R☉").frame(maxWidth: .infinity)
                 Text("\(starName) · ≈ \(radiusLabel) R☉").frame(maxWidth: .infinity)
             }
-            .font(.caption2).foregroundStyle(.white.opacity(0.6))
+            .font(.caption2).foregroundStyle(Theme.textSecondary)
         }
     }
 
@@ -162,14 +160,14 @@ struct StarColorLegend: View {
             HStack {
                 Text("hotter").foregroundStyle(.white.opacity(0.75))
                 Spacer()
-                Text("star colour ≈ temperature").foregroundStyle(.white.opacity(0.5))
+                Text("star colour ≈ temperature").foregroundStyle(Theme.textTertiary)
                 Spacer()
                 Text("cooler").foregroundStyle(.white.opacity(0.75))
             }
             .font(.caption2)
         }
         .padding(.horizontal, 14).padding(.vertical, 9)
-        .background(.black.opacity(0.35), in: RoundedRectangle(cornerRadius: 14))
+        .quietSurface()
     }
 }
 
@@ -178,14 +176,24 @@ struct StarColorLegend: View {
 /// Maps a stellar effective temperature to an approximate display colour along the
 /// blue(hot)→red(cool) sequence. A perceptual stand-in, not a calibrated blackbody.
 enum TemperatureColor {
+    /// One shared threshold table — display colour AND prose adjective per band —
+    /// so the sky's palette and the detail pages' words can't silently drift apart
+    /// (they were duplicated verbatim in `StarFacts.colourWord(forTemp:)` before).
+    private static let bands: [(minKelvin: Double, color: Color, adjective: String)] = [
+        (10_000, Color(red: 0.66, green: 0.74, blue: 1.0), "a blue-white"),    // O/B
+        (7_500,  Color(red: 0.82, green: 0.86, blue: 1.0), "a white"),         // A
+        (6_000,  Color(red: 1.0,  green: 0.98, blue: 0.92), "a yellow-white"), // F
+        (5_200,  Color(red: 1.0,  green: 0.95, blue: 0.74), "a yellow"),       // G
+        (3_700,  Color(red: 1.0,  green: 0.80, blue: 0.55), "an orange"),      // K
+        (-.infinity, Color(red: 1.0, green: 0.60, blue: 0.45), "a red"),       // M
+    ]
+
     static func color(forKelvin k: Double) -> Color {
-        switch k {
-        case 10_000...: return Color(red: 0.66, green: 0.74, blue: 1.0)   // O/B blue
-        case 7_500...:  return Color(red: 0.82, green: 0.86, blue: 1.0)   // A blue-white
-        case 6_000...:  return Color(red: 1.0,  green: 0.98, blue: 0.92)  // F white
-        case 5_200...:  return Color(red: 1.0,  green: 0.95, blue: 0.74)  // G yellow
-        case 3_700...:  return Color(red: 1.0,  green: 0.80, blue: 0.55)  // K orange
-        default:        return Color(red: 1.0,  green: 0.60, blue: 0.45)  // M red
-        }
+        bands.first { k >= $0.minKelvin }!.color
+    }
+
+    /// Colour adjective (with article) for prose, e.g. "an orange" star.
+    static func adjective(forKelvin k: Double) -> String {
+        bands.first { k >= $0.minKelvin }!.adjective
     }
 }

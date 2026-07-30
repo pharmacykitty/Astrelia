@@ -52,6 +52,12 @@ already exists.
 - Favourites/bookmarks across stars, deep-sky, landmarks.
 
 ### Galaxy Map
+- **Rework the nebulae** (Elysia, 2026-07-28 — scope not yet defined). Existing threads to fold
+  in when this happens: the `--shape sphere` bake mode for shell objects (Ring/Helix/SNRs read
+  flat off-angle), star-suppression pre-pass for Milky-Way SNR bakes (Vela/IC 443 false gas),
+  the procedural holdouts with no good visible-light source (Flame, Crescent, Owl…), fade-in
+  instead of popping after the async first build (ui-review doc), and the depth-occlusion
+  limitation below.
 - **Depth-sorted occlusion** — the known limitation: additive glow has no depth test, so stars
   behind a cloud shine through (Phase 7 "Follow-ups"). A true fix needs depth-sorted transparency.
 - "Artist's impression" tag on procedural (non-baked) landmarks; host-badge rings; distance-faded

@@ -63,12 +63,20 @@ final class ARCameraController {
     /// Latest tracked frame (camera pose + intrinsics), read once per render frame.
     var currentFrame: ARFrame? { session.currentFrame }
 
+    /// The last converted frame, keyed by ARFrame timestamp: the display can tick
+    /// at 120 Hz while the camera delivers ~60 fps, so without this at least half
+    /// of all conversions (a full-resolution CIContext render each) were wasted.
+    private var convertedFrame: (timestamp: TimeInterval, image: CGImage)?
+
     /// The live camera image as a `CGImage`, rotated for a portrait viewport.
     /// `capturedImage` is delivered in the sensor's landscape orientation, so we
     /// orient it `.right` to stand it up for a portrait-held phone.
     func currentCameraImage() -> CGImage? {
-        guard let pixelBuffer = session.currentFrame?.capturedImage else { return nil }
-        let image = CIImage(cvPixelBuffer: pixelBuffer).oriented(.right)
-        return ciContext.createCGImage(image, from: image.extent)
+        guard let frame = session.currentFrame else { return nil }
+        if let cached = convertedFrame, cached.timestamp == frame.timestamp { return cached.image }
+        let image = CIImage(cvPixelBuffer: frame.capturedImage).oriented(.right)
+        guard let converted = ciContext.createCGImage(image, from: image.extent) else { return nil }
+        convertedFrame = (frame.timestamp, converted)
+        return converted
     }
 }

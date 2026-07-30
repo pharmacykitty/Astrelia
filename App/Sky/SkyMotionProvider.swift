@@ -19,9 +19,6 @@ final class SkyMotionProvider: NSObject, CLLocationManagerDelegate {
 
     nonisolated override init() { super.init() }
 
-    /// `true` once the device motion reference frame has locked onto true north.
-    var isPointingReady: Bool { motion.deviceMotion?.attitude != nil }
-
     /// Latest device attitude as a rotation matrix (reference → device).
     var rotationMatrix: CMRotationMatrix? { motion.deviceMotion?.attitude.rotationMatrix }
 
