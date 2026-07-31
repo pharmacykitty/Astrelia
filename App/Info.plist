@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Base Info.plist: only what the generated one can't express — the custom
+	     launch screen (night ink + a dim rete mark). Everything else still comes
+	     from GENERATE_INFOPLIST_FILE + the INFOPLIST_KEY_* settings in project.yml. -->
+	<key>UILaunchScreen</key>
+	<dict>
+		<key>UIColorName</key>
+		<string>LaunchBackground</string>
+		<key>UIImageName</key>
+		<string>LaunchMark</string>
+		<key>UIImageRespectsSafeAreaInsets</key>
+		<false/>
+	</dict>
+</dict>
+</plist>
