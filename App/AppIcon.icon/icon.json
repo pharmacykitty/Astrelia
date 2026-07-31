@@ -1,0 +1,53 @@
+{
+  "fill" : {
+    "linear-gradient" : [
+      "srgb:0.047,0.067,0.157,1.00",
+      "srgb:0.016,0.020,0.051,1.00"
+    ]
+  },
+  "groups" : [
+    {
+      "layers" : [
+        {
+          "image-name" : "pointers.png",
+          "name" : "pointers"
+        },
+        {
+          "image-name" : "rule.png",
+          "name" : "rule"
+        },
+        {
+          "image-name" : "ecliptic.png",
+          "name" : "ecliptic"
+        },
+        {
+          "image-name" : "rings.png",
+          "name" : "rings"
+        },
+        {
+          "image-name" : "tympan.png",
+          "name" : "tympan"
+        },
+        {
+          "image-name" : "stars.png",
+          "name" : "stars"
+        }
+      ],
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.4
+      },
+      "specular" : true,
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.4
+      }
+    }
+  ],
+  "supported-platforms" : {
+    "circles" : [
+      "watchOS"
+    ],
+    "squares" : "shared"
+  }
+}
