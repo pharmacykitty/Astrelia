@@ -70,6 +70,20 @@
 >   through a bare `simctl` run traps as a "freeze" the moment the app runs from Xcode
 >   (this bit us: the reduced-res lens pass lacked a depth attachment its PSO declared).
 >
+> **Interior rebuilt 2026-07-31** (Elysia: the old interior "feels broken" — GPU frame
+> dumps confirmed it degraded into posterized olive/red stills). The new interior beat:
+> once inside, the aim **flips 180° over ~the first fifth of the fall** — you turn to
+> watch the universe you're leaving — and the shader's `aperture` now drives an
+> **inverse-aberration collapse** of all escaped rays toward the new forward axis
+> (β → 0.97): the entire outside sky compresses into a glowing dome that shrinks and
+> brightens (gain kept gentle + chroma washed toward warm white at high compression, so
+> the stretched equirect texels can't rainbow-band), then the **hue-preserving**
+> redshift (blend toward an ember of the pixel's own luminance, quadratic fade — the
+> old channel-kill posterized) reddens it to the flash. Tidal stretch capped at ~2.3×
+> (6× magnified the reduced-res target into smears) and a hash dither on the final
+> output kills the 8-bit banding. `-dive` harness throttle 0.05 → 0.3 (the trigger
+> took ~a minute to fire; screenshots mid-"dive" were actually the stalled approach).
+>
 > **Not yet done:** on-device verification (trigger, perf, HUD liveness), Kerr spin /
 > frame-dragging, bake longitude-seam wrap, and the SwiftUI AttributeGraph wedge under
 > 60 Hz flight churn (pre-existing; the dive routes around it, manual free-fly on the

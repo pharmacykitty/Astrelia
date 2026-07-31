@@ -1240,7 +1240,7 @@ struct GalaxyMapView: View {
             zoomAnchor = distance
             if dive {
                 enterFlyMode()
-                throttle = 0.05   // a slow, visible approach before the trigger fires
+                throttle = 0.3    // brisk approach: trigger within seconds (0.05 took ~a minute)
             }
         }
     }

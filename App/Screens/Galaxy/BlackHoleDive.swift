@@ -77,12 +77,15 @@ enum DivePhysics {
         // Kept restrained: NASA's rings are thin orange circles, not a white blaze.
         let flare = exp(-pow((r - 1.05) / 0.3, 2))
         s.discBoost = Float(0.35 * clamp01((10 - r) / 6) + 0.7 * flare)
-        // Inside: the outside universe's light dies — the warm lensed sky fades
-        // (aperture), everything reddens, stretches, and goes to black.
+        // Inside: you turn to face the universe you're leaving (renderer flips the
+        // aim); aperture then collapses that whole sky into a shrinking bright
+        // disk over the FULL 12.8 s — continuous evolution, the NASA interior
+        // beat — while redshift (delayed: the collapse leads, the red death
+        // follows) and a capped tidal stretch close the story before the flash.
         let inside = clamp01((1 - r) / Double(1 - endRadiusRs))
-        s.aperture = Float(0.85 * clamp01(inside / 0.55))
-        s.redshift = Float(pow(inside, 0.8))
-        s.spaghetti = Float(clamp01((inside - 0.15) / 0.6)) * motion
+        s.aperture = Float(0.97 * pow(inside, 1.15))
+        s.redshift = Float(pow(inside, 1.5))
+        s.spaghetti = Float(clamp01((inside - 0.35) / 0.5)) * motion
         s.flash = Float(clamp01((Double(endRadiusRs) + 0.09 - r) / 0.09))
         return s
     }

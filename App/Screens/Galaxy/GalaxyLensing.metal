@@ -145,9 +145,12 @@ static float4 bh_post(float3 col, float a, float3 dir, float3 fwd, constant Lens
         col *= boost * mix(float3(1.0), float3(0.86, 0.94, 1.18), u.beta * ahead * 0.6);
     }
     if (u.redshiftG > 0.001) {                             // everything reddens and dies
+        // Hue-preserving: blend toward a warm ember of the pixel's own luminance
+        // and fade quadratically. The old channel-kill (col *= 1-r after a hard
+        // red remap) posterized the whole interior into olive/red bands.
         float lum = dot(col, float3(0.30, 0.55, 0.15));
-        col = mix(col, lum * float3(1.0, 0.28, 0.10), u.redshiftG);
-        col *= 1.0 - u.redshiftG;                          // → true black at 1.0
+        col = mix(col, lum * float3(1.0, 0.42, 0.20), u.redshiftG * 0.75);
+        col *= 1.0 - u.redshiftG * u.redshiftG * 0.96;
     }
     // Speed-gated soft knee: mid-plunge the stacked boosts (disc images × beaming ×
     // headlight) clip the whole frame to white — roll the wash off filmically while
@@ -180,12 +183,14 @@ fragment float4 lens_fragment(LensVSOut in [[stage_in]],
 
     float2 ndc = float2(in.uv.x * 2.0 - 1.0, 1.0 - in.uv.y * 2.0);
 
-    // Tidal spaghettification: stretch the image radially along the hole axis.
+    // Tidal spaghettification: stretch the image radially along the fall axis.
+    // Capped at ~2.3× — the old 6× magnified the reduced-res target into giant
+    // posterized smears (the "broken" interior frames).
     if (u.spaghetti > 0.001) {
         float4 hc = u.viewProj * float4(hp, 1.0);
         float2 hndc = hc.w > 0.001 ? hc.xy / hc.w : float2(0.0);
         float2 dv = ndc - hndc;
-        float stretch = 1.0 + u.spaghetti * 5.0 * exp(-length(dv) * 1.1);
+        float stretch = 1.0 + u.spaghetti * 1.3 * exp(-length(dv) * 1.6);
         ndc = hndc + dv / stretch;
     }
 
@@ -248,6 +253,23 @@ fragment float4 lens_fragment(LensVSOut in [[stage_in]],
         outDir = normalize(dir - (cvec / max(perp, 1e-5)) * alpha);
     }
 
+    // Inside the horizon (aperture > 0) the camera has turned to face the
+    // universe it is leaving: the escaped rays' sampling crowds toward the
+    // backward axis (inverse aberration, β → ~0.97), so the ENTIRE outside sky
+    // compresses into a shrinking disk ahead — brightening as its light piles
+    // up, dimming to a rim-lit spot as the aperture closes. This replaces the
+    // old treatment (bg *= 1-aperture), which just faded the frame to the
+    // garbled disc leftovers.
+    float pileUp = 1.0;
+    if (u.aperture > 0.001 && !captured) {
+        float cone = saturate(dot(outDir, fwd));
+        outDir = bh_aberrate(outDir, fwd, -u.aperture * 0.97);
+        // Gentle gain: the dome should glow, not clip to a white sheet — the
+        // redshift ramp needs headroom to redden it before the flash.
+        pileUp = mix(1.0, smoothstep(-0.1, 0.45, cone) * (1.0 + 1.1 * cone * cone * cone),
+                     saturate(u.aperture * 1.2)) * mix(1.0, 0.72, u.aperture);
+    }
+
     // Background: the rendered galaxy sampled where the bent ray points, the baked
     // equirect sky when that leaves the frame (or during a dive, when the whole
     // aberrated sky must come from the bake).
@@ -296,8 +318,15 @@ fragment float4 lens_fragment(LensVSOut in [[stage_in]],
             bg = mix(bg, b.rgb, bakeW);
             bgA = mix(bgA, b.a, bakeW);
         }
-        bg *= 1.0 - u.aperture;                             // the outside universe closes down
-        bgA *= 1.0 - u.aperture;
+        // The collapsing sky: bright core, dark rim. At extreme compression the
+        // equirect's texels stretch into rainbow bands — wash chroma toward a
+        // warm white as the aperture closes so the dome stays clean.
+        if (u.aperture > 0.001) {
+            float lum = dot(bg, float3(0.30, 0.55, 0.15));
+            bg = mix(bg, lum * float3(1.0, 0.93, 0.80), saturate(u.aperture * u.aperture * 0.75));
+        }
+        bg *= pileUp;
+        bgA = max(bgA * saturate(pileUp), bgA * 0.2);
     }
 
     float3 col = acc + bg * trans;
@@ -305,7 +334,12 @@ fragment float4 lens_fragment(LensVSOut in [[stage_in]],
     // the disc adds its own coverage on top of whatever background survives.
     float a = captured ? 1.0 : max(bgA * trans, saturate(1.0 - trans));
 
-    return bh_post(col, a, dir, fwd, u);
+    float4 res = bh_post(col, a, dir, fwd, u);
+    // Blue-noise-ish dither: the interior's long smooth ramps posterize on the
+    // 8-bit reduced-res target without it.
+    res.rgb += (bh_hash(in.uv * float2(u.viewW, u.viewH) + fract(u.time * 0.37) * 61.0) - 0.5)
+               * (2.0 / 255.0);
+    return res;
 }
 
 // ---- Equirect sky bake ------------------------------------------------------
