@@ -19,14 +19,22 @@ struct GalaxySprite {
     var minPixel: Float, maxPixel: Float  // size clamp (points)
     var softness: Float                   // 0 = hard disc, 1 = soft glow
     var mode: Float                       // 0 = world-sized, 1 = screen-sized
+    // Anisotropy (nebula wisps): world-space stretch direction + elongation.
+    // dir = 0 / aspect = 1 renders the classic round billboard. Kept as flat
+    // scalars so the Swift and Metal layouts stay byte-identical (16 floats).
+    var dx: Float, dy: Float, dz: Float
+    var aspect: Float
 
     init(position: SIMD3<Float>, radius: Float, color: SIMD4<Float>,
-         minPixel: Float, maxPixel: Float, softness: Float, mode: Float) {
+         minPixel: Float, maxPixel: Float, softness: Float, mode: Float,
+         direction: SIMD3<Float> = .zero, aspect: Float = 1) {
         px = position.x; py = position.y; pz = position.z
         self.radius = radius
         r = color.x; g = color.y; b = color.z; a = color.w
         self.minPixel = minPixel; self.maxPixel = maxPixel
         self.softness = softness; self.mode = mode
+        dx = direction.x; dy = direction.y; dz = direction.z
+        self.aspect = aspect
     }
 }
 

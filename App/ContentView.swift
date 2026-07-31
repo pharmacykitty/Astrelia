@@ -445,13 +445,16 @@ struct ContentView: View {
                 StarColorLegend().transition(Theme.slide(from: .bottom))
             }
 
-            destinationDock
-
             // Live readout, refreshed calmly (kept out of the 60fps render loop).
             TimelineView(.periodic(from: .now, by: 0.25)) { _ in
                 let camera = makeSkyCamera(size: size)
                 bottomPanel(camera.flatMap { solarState(camera: $0, size: size, date: shifted(Date())) })
             }
+
+            // Below the readout, full width — but pinned to the portrait width so
+            // the capsule keeps its size when the chrome rotates to landscape.
+            destinationDock
+                .frame(maxWidth: min(size.width, size.height) - 32)
         }
         .padding(.horizontal)
         .padding(.top, edgeInset(quadrant, safe) + 8)
@@ -496,7 +499,7 @@ struct ContentView: View {
     /// icons only, one slim night-ink capsule. It recedes (not hides) while you're
     /// gazing; VoiceOver labels carry the names the icons no longer print.
     private var destinationDock: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 0) {
             ForEach(AppScreen.allCases) { screen in
                 Button {
                     open(screen)
@@ -510,6 +513,8 @@ struct ContentView: View {
                         .shadow(color: screen.tint.opacity(0.35), radius: 6)
                         // The visual circle is 36pt but the tap target stays 44.
                         .frame(width: Theme.controlSize, height: Theme.controlSize)
+                        // Cells share the full capsule width evenly.
+                        .frame(maxWidth: .infinity)
                         .contentShape(.circle)
                 }
                 .buttonStyle(.plain)

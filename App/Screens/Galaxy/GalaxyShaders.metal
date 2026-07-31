@@ -8,7 +8,7 @@ using namespace metal;
 // precision over the galaxy's huge scale range.
 
 struct SpriteInstance {
-    // Kept as a flat run of 12 floats so Swift's memory layout matches exactly with
+    // Kept as a flat run of 16 floats so Swift's memory layout matches exactly with
     // no float3 alignment surprises.
     float px, py, pz;        // world position (parsecs)
     float radius;            // world radius (mode 0) OR screen coefficient (mode 1)
@@ -16,6 +16,8 @@ struct SpriteInstance {
     float minPixel, maxPixel;// size clamp (points)
     float softness;          // 0 = hard disc (stars), 1 = soft glow (gas/bloom)
     float mode;              // 0 = world-sized (×focal/depth), 1 = screen-sized (÷depth)
+    float dx, dy, dz;        // world-space wisp direction (0 = round billboard)
+    float aspect;            // elongation along dir (1 = round)
 };
 
 struct Uniforms {
@@ -59,7 +61,25 @@ vertex VSOut sprite_vertex(uint vid [[vertex_id]],
     float worldPx = s.radius * u.halfHeightFocal / clip.w;
     float screenPx = s.radius / clip.w;
     float px = clamp(s.mode < 0.5 ? worldPx : screenPx, s.minPixel, s.maxPixel);
-    float2 ndc = kCorners[vid] * (px / (float2(u.viewW, u.viewH) * 0.5)) * clip.w;
+
+    // Wisps: anisotropic sprites stretch along the projection of their world-space
+    // direction (a nebula's local filament tangent), so gas streaks instead of
+    // stacking as round dots. dir = 0 / aspect ≈ 1 keeps the round fast path.
+    float2 ndc;
+    float dirMag = abs(s.dx) + abs(s.dy) + abs(s.dz);
+    if (s.aspect > 1.001 && dirMag > 1e-5) {
+        float3 rel2 = rel + normalize(float3(s.dx, s.dy, s.dz)) * max(1e-4, s.radius);
+        float4 clip2 = u.viewProj * float4(rel2, 1.0);
+        float2 d = clip2.xy / max(0.0001, clip2.w) - clip.xy / clip.w;
+        float dl = length(d);
+        float2 sdir = dl > 1e-6 ? d / dl : float2(1.0, 0.0);
+        float2 perp = float2(-sdir.y, sdir.x);
+        float2 offPts = kCorners[vid].x * sdir * (px * s.aspect)
+                      + kCorners[vid].y * perp * px;
+        ndc = offPts / (float2(u.viewW, u.viewH) * 0.5) * clip.w;
+    } else {
+        ndc = kCorners[vid] * (px / (float2(u.viewW, u.viewH) * 0.5)) * clip.w;
+    }
 
     out.position = clip;
     out.position.xy += ndc;
@@ -75,9 +95,20 @@ vertex VSOut sprite_vertex(uint vid [[vertex_id]],
 // Additive sprites return premultiplied colour (blend ONE, ONE): light accumulates.
 fragment float4 sprite_additive(VSOut in [[stage_in]]) {
     float r = length(in.uv);
-    float exponent = mix(0.25, 2.2, in.softness);   // hard disc → soft glow
-    float mask = pow(saturate(1.0 - r), exponent);
-    float a = in.color.a * mask;
+    float a;
+    if (in.softness < 0.7) {
+        // Crisp bodies (stars, cores, the accretion disc): the original power
+        // falloff. The gaussian branch below must NOT catch these — at 0.45 it
+        // swept up the Sgr A* disc sprites and blew the hole into white lobes.
+        float exponent = mix(0.25, 2.2, in.softness);
+        a = in.color.a * pow(saturate(1.0 - r), exponent);
+    } else {
+        // Nebula gas: a windowed gaussian. The power falloff leaves a faint rim
+        // that makes overlapping sprites read as stacked discs; the gaussian
+        // fuses neighbours into continuous vapour.
+        float g = exp(-r * r * (2.0 + 4.0 * in.softness));
+        a = in.color.a * g * saturate(1.0 - r);
+    }
     return float4(in.color.rgb * a, a);
 }
 

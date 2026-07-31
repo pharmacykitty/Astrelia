@@ -971,27 +971,79 @@ struct GalaxyMapView: View {
         // Invisible depth caps trace the nebula's *bright* shape into the depth buffer so
         // background stars behind the dense gas are occluded — while genuinely dark gaps
         // (e.g. Pacman's mouth) get no cap, so stars correctly show through them.
-        // Subsampled (every Nth bright particle) to keep the occluder set small.
-        let capStride = max(1, model.gas.count / 700)
+        // Denser + lower-threshold than the first cut (2026-07-31): the gas body was
+        // still see-through across its mid-brightness regions.
+        let capStride = max(1, model.gas.count / 1500)
+        // Small nebulae (the Ring is 0.4 pc against Carina's 46) cram the full ~55k
+        // bake into a tiny patch of screen — the overdraw saturates them to white no
+        // matter the per-sprite size. Subsample the particles and dim the alphas by
+        // physical size so a planetary keeps its dark interior and true colours.
+        let targetParticles = 6000 + Int(34000 * min(1, half / 15))
+        let particleStride = max(1, model.gas.count / targetParticles)
+        let sizeDim = Double(min(1, 0.45 + half / 8))
+
+        // Local filament tangents from the bake's own density field: a coarse
+        // luminance histogram, blurred once, then the perpendicular of its gradient.
+        // Wisp sprites stretch along these, which is what makes gas read as *gas* —
+        // streaks following the structure instead of round dots stacking on it.
+        let grid = 96
+        var density = [Float](repeating: 0, count: grid * grid)
+        @inline(__always) func cellIndex(_ v: Float) -> Int {
+            max(0, min(grid - 1, Int((v * 0.5 + 0.5) * Float(grid))))
+        }
+        for p in model.gas {
+            density[cellIndex(p.pos.y) * grid + cellIndex(p.pos.x)] += simd_dot(p.color, lumW)
+        }
+        var blurred = density
+        for y in 1..<(grid - 1) {
+            for x in 1..<(grid - 1) {
+                var sum: Float = 0
+                for dy in -1...1 { for dx in -1...1 { sum += density[(y + dy) * grid + (x + dx)] } }
+                blurred[y * grid + x] = sum / 9
+            }
+        }
+        func filamentTangent(_ pos: SIMD2<Float>) -> SIMD2<Float> {
+            let cx = cellIndex(pos.x), cy = cellIndex(pos.y)
+            let gx = blurred[cy * grid + min(grid - 1, cx + 1)] - blurred[cy * grid + max(0, cx - 1)]
+            let gy = blurred[min(grid - 1, cy + 1) * grid + cx] - blurred[max(0, cy - 1) * grid + cx]
+            let len = (gx * gx + gy * gy).squareRoot()
+            if len < 1e-4 {   // flat density → any direction; seeded so it's stable
+                let a = Float(Double.random(in: 0..<(2 * .pi), using: &rng))
+                return SIMD2(cos(a), sin(a))
+            }
+            return SIMD2(-gy, gx) / len
+        }
         for (i, p) in model.gas.enumerated() {
             let lum = simd_dot(p.color, lumW)
             let depth = gauss() * half * 0.11 * (0.5 + lum)    // some volume, but tight enough to avoid face-on gaps
             let world = center + (p.pos.x * half) * right + (p.pos.y * half) * up + depth * n
-            if lum > 0.3 && i % capStride == 0 {
-                occluder.append(GalaxySprite(position: world, radius: half * 0.06, color: SIMD4(0, 0, 0, 0),
+            if lum > 0.15 && i % capStride == 0 {
+                occluder.append(GalaxySprite(position: world, radius: half * 0.05, color: SIMD4(0, 0, 0, 0),
                                              minPixel: 0, maxPixel: 1400, softness: 0, mode: 0))
             }
-            // A soft bloom underglow fuses neighbours into a smooth cloud; a tighter
-            // sprite adds definition. Opacities kept low so the dense core builds up a
-            // bright-but-coloured centre instead of saturating to flat white.
-            let bloom = min(0.022, Double(lum) * 0.032)
-            additive.append(GalaxySprite(position: world, radius: half * 0.075,
+            guard i % particleStride == 0 else { continue }
+            // Two sprites per particle: a small soft underglow fuses neighbours, and a
+            // TIGHT detail sprite carries the photo's filament structure. The first cut
+            // used sprites ~2× this size at higher alpha — thousands of overlaps blurred
+            // the structure away and saturated cores to flat white ("fuzzy" and blown).
+            // maxPixel caps stop the close-range accumulation from whiting out the frame.
+            // Alpha follows lum^1.35 — gamma-compressed so mid-tones don't stack to
+            // white, but warm enough that the famous bright cores (M42) still punch.
+            let bloom = min(0.013, pow(Double(lum), 1.15) * 0.02) * sizeDim
+            additive.append(GalaxySprite(position: world, radius: half * 0.05,
                                          color: SIMD4(p.color.x, p.color.y, p.color.z, Float(bloom)),
-                                         minPixel: 0, maxPixel: 1400, softness: 1, mode: 0))
-            let op = min(0.085, max(0.016, Double(lum) * 0.10))
-            additive.append(GalaxySprite(position: world, radius: half * 0.04,
+                                         minPixel: 0, maxPixel: 380, softness: 1, mode: 0))
+            // The detail sprite is a wisp: stretched ~2.6:1 along the local filament.
+            // The alpha ceiling eases down for physically huge faces (Carina spans
+            // 64 pc of wisps — at full punch its whole centre stacks to white).
+            let t = filamentTangent(p.pos)
+            let wispDir = t.x * right + t.y * up
+            let punchCap = 0.13 * Double(min(1, pow(15 / half, 0.25)))
+            let op = min(punchCap, 0.02 + pow(Double(lum), 1.35) * 0.14) * sizeDim
+            additive.append(GalaxySprite(position: world, radius: half * 0.018,
                                          color: SIMD4(p.color.x, p.color.y, p.color.z, Float(op)),
-                                         minPixel: 0, maxPixel: 1400, softness: 0.9, mode: 0))
+                                         minPixel: 0, maxPixel: 200, softness: 0.75, mode: 0,
+                                         direction: wispDir, aspect: 2.6))
         }
     }
 

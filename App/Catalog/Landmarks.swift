@@ -30,7 +30,10 @@ struct Landmark: Identifiable, Hashable {
     /// its physical size so the object fills a good portion of the screen.
     var suggestedViewDistance: Float {
         if id == "sgr-a" { return 6000 }   // pull back to take in the galactic core
-        return max(25, Float(radiusParsecs) * 6)
+        // ~6 radii frames the object at roughly a third of the screen height. The
+        // floor only guards the near plane — a high floor (was 25 pc) left small
+        // planetaries (Ring: 0.4 pc) as unreadable dots after "Fly here".
+        return max(5, Float(radiusParsecs) * 6)
     }
 }
 

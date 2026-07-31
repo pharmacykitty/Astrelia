@@ -327,6 +327,13 @@ struct SpriteInstanceB {            // matches SpriteInstance in GalaxyShaders.m
     float minPixel, maxPixel;
     float softness;
     float mode;
+    // MUST stay byte-identical with the main shader's 16-float layout: when the
+    // wisp fields were added there, this copy's stale 12-float stride scrambled
+    // the lens's offscreen scene pass into giant white lobes around Sgr A*.
+    // The bake pass renders these sprites round (no stretch) — at the lensed
+    // far-field's scale the anisotropy is sub-pixel anyway.
+    float dx, dy, dz;
+    float aspect;
 };
 
 struct BakeVSOut {

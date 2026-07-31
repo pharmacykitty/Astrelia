@@ -210,18 +210,28 @@ dust: dustCount × float32 x, y
 `NebulaLibrary` (`NebulaModel.swift`) maps `landmark.id → .nbl` and loads it.
 `appendBakedNebula` orients the normalised sheet **facing Earth** at the landmark's real
 position/scale, and synthesises per-particle depth (front-on = the photo's shape; orbit =
-volumetric). Each gas particle becomes a large soft bloom sprite + a tighter definition
-sprite; opacities are kept low so dense cores build a bright-but-coloured centre instead
-of saturating to flat white. There is deliberately **no dust overlay** — dark lanes come
-for free from gas-density absence. 27 nebulae are baked (`NebulaLibrary.baked`): Orion,
+volumetric). There is deliberately **no dust overlay** — dark lanes come for free from
+gas-density absence. 27 nebulae are baked (`NebulaLibrary.baked`): Orion,
 Eagle/Pillars, Lagoon, Trifid, Carina, Tarantula, Crab, Veil, Ring, Helix, Cone, North
 America, Bubble, Omega, Lobster, Horsehead, Dumbbell, Little Dumbbell, Southern Ring,
 Butterfly, Saturn, Eskimo, Vela, Jellyfish, Pacman, Rosette, California.
 
+**Sprite emission (reworked 2026-07-31 — "sharper, denser, gassy"):** each gas particle
+becomes a small soft bloom sprite plus a **wisp** — a detail sprite stretched ~2.6:1 and
+oriented along the local filament tangent, computed per nebula from the bake's own
+density field (96² luminance histogram → blurred → gradient perpendicular). Wisps and
+blooms use a **windowed-gaussian falloff** in `sprite_additive` (softness ≥ 0.7); the
+old power falloff's rim made overlaps read as stacked discs. Opacity follows
+**lum^1.35, gamma-compressed** with a cap that eases down for physically huge faces
+(Carina), and small nebulae **subsample particles + dim alphas by size** so planetaries
+(Ring) keep dark interiors instead of saturating. Depth caps are denser (~1500,
+`lum > 0.15`) so background stars stop bleeding through mid-brightness gas. Anisotropy
+rides in 4 extra floats on `SpriteInstance` (16 total) — **update `SpriteInstanceB` in
+`GalaxyLensing.metal` in lockstep** or the lens's offscreen pass scrambles.
+
 **Baking lessons (baked into the workflow):** source *visible-light, not infrared* (IR
 gives "off" false colours); no dust overlay on bakes (an overlay punches black holes);
-dense (~55–60k particles, γ≈1.4) + large soft low-opacity sprites = gas-like and gap-free
-without core blowout.
+dense bakes stay (~55–60k particles, γ≈1.4) — the *renderer* now subsamples per size.
 
 ---
 
