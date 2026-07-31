@@ -470,18 +470,13 @@ final class GalaxyMetalRenderer: NSObject {
 
         // Look where you're falling (eased), drifting toward the disc-plane
         // composition as the fall deepens, with a slow speed-scaled roll.
-        // INSIDE the horizon the aim flips 180°: you turn to watch the outside
-        // universe you're leaving — the NASA "Beyond the Brink" interior beat.
-        // The shader's aperture collapse then plays out around this new forward
-        // axis (the sky crowding into a shrinking, brightening disk) instead of
-        // the old treatment (staring at the disc while ramps garbled it).
+        // (A look-back flip was tried here 2026-07-31 and read as ZOOMING AWAY —
+        // compression of the sky toward the view centre is optically identical
+        // to receding. The plunge stays forward; the shader's aperture now
+        // magnifies the forward view instead: the tunnel, not the dome.)
         let tiltRamp = max(0, min(1, (6 - diveNarrativeR) / 2.5))
-        let inside = max(0, min(1, (1 - diveNarrativeR) / (1 - DivePhysics.endRadiusRs)))
-        let flip = min(1, inside / 0.22)                     // turned around by ~22% of the interior
-        let aimIn = simd_normalize(inwardR + diveTilt * tiltRamp)
-        let aimOut = simd_normalize(-inwardR + diveTilt * 0.25)
-        let aim = simd_normalize(aimIn * (1 - flip) + aimOut * flip)
-        let ease = min(1, dt / (flip > 0 && flip < 1 ? 0.7 : 1.2))   // the turn itself moves quicker
+        let aim = simd_normalize(inwardR + diveTilt * tiltRamp)
+        let ease = min(1, dt / 1.2)
         var forward = diveForward + (aim - diveForward) * ease
         forward = simd_length_squared(forward) < 1e-8 ? inwardR : simd_normalize(forward)
         diveForward = forward

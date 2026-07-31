@@ -195,12 +195,15 @@ fragment float4 lens_fragment(LensVSOut in [[stage_in]],
     }
 
     float3 dir = normalize(fwd + right * (ndc.x * u.tanHalfW) + up * (ndc.y * u.tanHalfH));
-    // Relativistic aberration, INVERSE map: for each screen direction in the
-    // infalling frame, find the rest-frame ray it came from (negative β). The sky
-    // crowds bright toward the travel axis and the shadow shrinks. 0.5×β: real
-    // geometry (the camera truly falls to r → rs) now provides the engulfment, so
-    // the aberration can be stronger without the hole appearing to recede.
-    if (u.beta > 0.001) dir = bh_aberrate(dir, fwd, -u.beta * 0.6);
+    // Relativistic aberration, INVERSE map: negative β crowds the sky into view
+    // (approach compression); positive warp MAGNIFIES the forward view. The
+    // aperture rides the warp positive through the interior: the view plunges
+    // INTO the darkness — the black centre swallowing outward while the disc and
+    // lensed sky stream past the frame edges. (Compression toward the centre
+    // reads as receding — that's the failed "collapse dome" — magnification
+    // toward the axis is the falling-in cue.)
+    float warp = clamp(-0.6 * u.beta + 1.45 * u.aperture, -0.95, 0.9);
+    if (fabs(warp) > 0.001) dir = bh_aberrate(dir, fwd, warp);
 
     float dAlong = dot(hp, dir);
     float3 cvec = dir * max(dAlong, 0.0) - hp;             // hole → closest approach
@@ -253,23 +256,6 @@ fragment float4 lens_fragment(LensVSOut in [[stage_in]],
         outDir = normalize(dir - (cvec / max(perp, 1e-5)) * alpha);
     }
 
-    // Inside the horizon (aperture > 0) the camera has turned to face the
-    // universe it is leaving: the escaped rays' sampling crowds toward the
-    // backward axis (inverse aberration, β → ~0.97), so the ENTIRE outside sky
-    // compresses into a shrinking disk ahead — brightening as its light piles
-    // up, dimming to a rim-lit spot as the aperture closes. This replaces the
-    // old treatment (bg *= 1-aperture), which just faded the frame to the
-    // garbled disc leftovers.
-    float pileUp = 1.0;
-    if (u.aperture > 0.001 && !captured) {
-        float cone = saturate(dot(outDir, fwd));
-        outDir = bh_aberrate(outDir, fwd, -u.aperture * 0.97);
-        // Gentle gain: the dome should glow, not clip to a white sheet — the
-        // redshift ramp needs headroom to redden it before the flash.
-        pileUp = mix(1.0, smoothstep(-0.1, 0.45, cone) * (1.0 + 1.1 * cone * cone * cone),
-                     saturate(u.aperture * 1.2)) * mix(1.0, 0.72, u.aperture);
-    }
-
     // Background: the rendered galaxy sampled where the bent ray points, the baked
     // equirect sky when that leaves the frame (or during a dive, when the whole
     // aberrated sky must come from the bake).
@@ -318,15 +304,16 @@ fragment float4 lens_fragment(LensVSOut in [[stage_in]],
             bg = mix(bg, b.rgb, bakeW);
             bgA = mix(bgA, b.a, bakeW);
         }
-        // The collapsing sky: bright core, dark rim. At extreme compression the
-        // equirect's texels stretch into rainbow bands — wash chroma toward a
-        // warm white as the aperture closes so the dome stays clean.
+        // Surviving outside light dims gently as the plunge deepens (the tunnel's
+        // magnification already thins it; the redshift ramp does the killing).
+        // Chroma washes slightly warm at high warp so magnified equirect texels
+        // can't rainbow-band.
         if (u.aperture > 0.001) {
             float lum = dot(bg, float3(0.30, 0.55, 0.15));
-            bg = mix(bg, lum * float3(1.0, 0.93, 0.80), saturate(u.aperture * u.aperture * 0.75));
+            bg = mix(bg, lum * float3(1.0, 0.93, 0.80), saturate(u.aperture * u.aperture * 0.6));
+            bg *= 1.0 - 0.55 * u.aperture;
+            bgA *= 1.0 - 0.4 * u.aperture;
         }
-        bg *= pileUp;
-        bgA = max(bgA * saturate(pileUp), bgA * 0.2);
     }
 
     float3 col = acc + bg * trans;
