@@ -50,6 +50,20 @@ already exists.
 ### Catalog / Detail
 - Observation **journal** — log what you saw, notes, date/location (SwiftData).
 - Favourites/bookmarks across stars, deep-sky, landmarks.
+- **Bolometric correction for luminosity/derived radius** (data-verification pass,
+  2026-07-30). HYG's `lum` is V-band — no bolometric correction — so hot and cool
+  stars understate their true output, and the Stefan–Boltzmann derived radius
+  inherits the error where it's most visible: **Betelgeuse shows ~13k L☉ / ≈268 R☉
+  vs literature ~100k L☉(bol) / ~640–950 R☉**. The math itself is unit-tested and
+  correct; the input is visual. Fix: apply BC(B−V) (e.g. Flower 1996 polynomials,
+  or Ballesteros-consistent) in `CelestialCore.Astrophysics` before deriving, and
+  relabel facts back from "visible light" to total. Until then the fact copy says
+  "visible light" (accurate), and the radius row stays "(derived) ≈". Affects the
+  size silhouette, HR placement is fine (classic HR diagrams are V-based anyway).
+- **Catalog-faithful but dated distances**: HYG carries Hipparcos parallaxes —
+  e.g. Betelgeuse 498 ly vs the modern ~550 ly (radio ~640 ly). Not a bug; note
+  if a Gaia-based refresh is ever considered (Gaia is unreliable for the very
+  brightest stars, so this is genuinely open).
 
 ### Galaxy Map
 - **Rework the nebulae** (Elysia, 2026-07-28 — scope not yet defined). Existing threads to fold

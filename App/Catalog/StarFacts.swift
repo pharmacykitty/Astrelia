@@ -118,12 +118,16 @@ enum StarFacts {
         return "Its light took \(compact(years)) years to reach you — it left long before recorded history."
     }
 
-    /// "Pours out ~120,000× the Sun's light." / "About 1⁄400 as bright as the Sun."
+    /// "Pours out ~120,000× the Sun's visible light." / "About 1⁄400 as bright…"
+    /// "Visible" is load-bearing: HYG's luminosity is V-band (no bolometric
+    /// correction), so for very hot or cool stars the all-wavelengths figure is
+    /// higher — Betelgeuse emits ~13k× the Sun in visible light but ~100k× in
+    /// total. See the bolometric-correction item in docs/improvement-backlog.md.
     static func luminositySentence(_ luminositySolar: Double) -> String {
         if luminositySolar >= 1.15 {
-            return "Pours out about \(compact(luminositySolar))× the Sun's light."
+            return "Pours out about \(compact(luminositySolar))× the Sun's visible light."
         } else if luminositySolar <= 0.85 {
-            return "Shines at roughly \(percent(luminositySolar)) of the Sun's brightness."
+            return "Shines at roughly \(percent(luminositySolar)) of the Sun's visible brightness."
         }
         return "About as luminous as the Sun."
     }
@@ -262,12 +266,48 @@ enum StarFacts {
     /// its database id. Never empty — so every star in the catalog is showable.
     static func displayName(for star: Star) -> String {
         if let n = star.properName, !n.isEmpty { return n }
-        if let bf = star.bayerFlamsteed, !bf.isEmpty { return bf }
+        if let bf = formattedDesignation(star.bayerFlamsteed) { return bf }
         if let hr = star.harvardRevised { return "HR \(hr)" }
         if let hd = star.henryDraper { return "HD \(hd)" }
         if let hip = star.hipparcos { return "HIP \(hip)" }
         if let gl = star.gliese, !gl.isEmpty { return gl }
         return "Star \(star.id)"
+    }
+
+    /// HYG's raw Bayer/Flamsteed tokens read as database dumps ("9Alp CMa",
+    /// "Kap1Scl") — a planetarium should speak the sky's own notation. Maps the
+    /// Bayer abbreviation to its Greek letter ("α CMa", "κ¹ Scl"), keeping the
+    /// Flamsteed number only when there's no Greek letter ("21 And"). Strings that
+    /// don't parse pass through unchanged.
+    static func formattedDesignation(_ bayerFlamsteed: String?) -> String? {
+        guard let bf = bayerFlamsteed?.trimmingCharacters(in: .whitespaces), !bf.isEmpty else { return nil }
+        guard let match = bf.wholeMatch(of: /(\d+)?([A-Za-z]+?)?(\d)?\s*([A-Z][A-Za-z]{2})/) else { return bf }
+        let flamsteed = match.1.map(String.init)
+        let bayer = match.2.map(String.init)
+        let constellation = String(match.4)
+        if let bayer, let greek = Self.greekLetters[bayer.lowercased()] {
+            let superscript = match.3.flatMap { Self.superscripts[String($0)] } ?? ""
+            return "\(greek)\(superscript) \(constellation)"
+        }
+        if let flamsteed, bayer == nil { return "\(flamsteed) \(constellation)" }
+        return bf
+    }
+
+    /// The 24 Bayer abbreviations HYG uses, mapped to their Greek letters.
+    private static let greekLetters: [String: String] = [
+        "alp": "α", "bet": "β", "gam": "γ", "del": "δ", "eps": "ε", "zet": "ζ",
+        "eta": "η", "the": "θ", "iot": "ι", "kap": "κ", "lam": "λ", "mu": "μ",
+        "nu": "ν", "xi": "ξ", "omi": "ο", "pi": "π", "rho": "ρ", "sig": "σ",
+        "tau": "τ", "ups": "υ", "phi": "φ", "chi": "χ", "psi": "ψ", "ome": "ω",
+    ]
+
+    private static let superscripts = ["1": "¹", "2": "²", "3": "³", "4": "⁴"]
+
+    /// Formats an apparent magnitude to one decimal, normalizing negative zero —
+    /// Rigil Kentaurus at −0.01 must print "0.0", never "mag -0.0".
+    static func mag(_ value: Double) -> String {
+        let rounded = (value * 10).rounded() / 10
+        return String(format: "%.1f", rounded == 0 ? 0 : rounded)
     }
 
     /// One lowercase haystack per star for the Catalog's live search — built once
