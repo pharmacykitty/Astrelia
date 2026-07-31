@@ -40,6 +40,16 @@ enum Theme {
         startPoint: .top, endPoint: .bottom
     )
 
+    /// The night's own ink: a deep blue-black derived from `spaceGradient`, used
+    /// (translucent) as the fill of every utility surface. Neutral materials over
+    /// the near-black sky render as flat *gray* slabs — this keeps the chrome in
+    /// the night's palette instead of on top of it.
+    static let nightInk = Color(red: 0.06, green: 0.08, blue: 0.16)
+
+    /// One gold for everything star-tinted (catalog rows, star detail, About's
+    /// star-catalog card) — softer than system yellow, matching the ecliptic's.
+    static let gold = Color(red: 0.96, green: 0.82, blue: 0.51)
+
     // MARK: Text emphasis
 
     // One vocabulary for text over the dark sky instead of ad-hoc opacities.
@@ -83,10 +93,11 @@ extension View {
     }
 
     /// The quieter sibling of `luminousSurface`, for utility panels over live
-    /// content (readouts, legends, plot insets): the same glass and hairline ring,
-    /// but untinted and glowless, so it recedes instead of glowing.
+    /// content (readouts, legends, plot insets): night ink and a hairline ring,
+    /// untinted and glowless, so it recedes instead of glowing. Deliberately NOT
+    /// a neutral material — over the near-black sky those render as gray slabs.
     func quietSurface(cornerRadius: CGFloat = Theme.cardRadius) -> some View {
-        background(.ultraThinMaterial, in: .rect(cornerRadius: cornerRadius))
+        background(Theme.nightInk.opacity(0.55), in: .rect(cornerRadius: cornerRadius))
             .clipShape(.rect(cornerRadius: cornerRadius))
             .overlay {
                 RoundedRectangle(cornerRadius: cornerRadius)

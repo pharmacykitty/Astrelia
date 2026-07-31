@@ -52,8 +52,9 @@ struct Constellation3DView: View {
                 if let model {
                     let vp = makeViewProjection(model: model,
                                                 aspect: Float(size.width / max(size.height, 1)))
+                    let safe = EdgeInsets.deviceSafeArea
                     Canvas { context, _ in
-                        draw(model: model, in: context, size: size, viewProjection: vp)
+                        draw(model: model, in: context, size: size, viewProjection: vp, safe: safe)
                     }
                     .contentShape(Rectangle())
                     .gesture(dragGesture)
@@ -140,7 +141,7 @@ struct Constellation3DView: View {
     // MARK: Rendering
 
     private func draw(model: Constellation3DModel, in context: GraphicsContext,
-                      size: CGSize, viewProjection vp: simd_float4x4) {
+                      size: CGSize, viewProjection vp: simd_float4x4, safe: EdgeInsets) {
         // Sightlines from Earth out to each figure star. They collapse to nothing at the
         // exact front view (you're looking straight down them, so the stars line up) and
         // fan out into a starburst the moment you rotate away — making "these stars only
@@ -193,15 +194,19 @@ struct Constellation3DView: View {
         var labelRects: [CGRect] = []
         for star in model.stars where star.label != nil {
             guard let (p, _) = project(star.position, vp, size) else { continue }
-            let text = Text(star.label!).font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.white.opacity(0.82))
-                + Text("\n" + formatLightYears(star.distanceLightYears))
+            let distance = Text(formatLightYears(star.distanceLightYears))
                 .font(.system(size: 9, weight: .medium))
                 .foregroundStyle(Theme.accent.opacity(0.75))
+            let text = Text("\(star.label!)\n\(distance)")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.white.opacity(0.82))
             let resolved = context.resolve(text)
             let m = resolved.measure(in: CGSize(width: 150, height: 40))
             let rect = CGRect(x: p.x + 7, y: p.y - 7 - m.height, width: m.width, height: m.height)
-            guard rect.minX > 2, rect.maxX < size.width - 2, rect.minY > 2, rect.maxY < size.height - 2,
+            // Clamped to the safe area (the view ignores it, so 0 is the screen's
+            // physical edge) — an edge star's label is skipped, never cut in half.
+            guard rect.minX > safe.leading + 6, rect.maxX < size.width - safe.trailing - 6,
+                  rect.minY > safe.top + 6, rect.maxY < size.height - safe.bottom - 6,
                   !labelRects.contains(where: { $0.intersects(rect) }) else { continue }
             labelRects.append(rect.insetBy(dx: -4, dy: -4))
             context.draw(resolved, at: CGPoint(x: p.x + 7, y: p.y - 7), anchor: .bottomLeading)
@@ -440,7 +445,7 @@ struct Constellation3DModel {
                 position: c.pos,
                 magnitude: c.mag,
                 color: StarColor.from(colorIndex: c.star.colorIndex),
-                label: c.mag <= 3.0 ? (c.star.properName ?? c.star.bayerFlamsteed) : nil,
+                label: c.mag <= 3.0 ? (c.star.properName ?? StarFacts.formattedDesignation(c.star.bayerFlamsteed)) : nil,
                 distanceLightYears: Double(simd_length(c.pos)) * Astrophysics.lightYearsPerParsec)
         }
 

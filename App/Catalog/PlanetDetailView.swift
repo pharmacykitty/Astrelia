@@ -27,11 +27,8 @@ struct PlanetDetailView: View {
             }
         }
         .overlay(alignment: .topTrailing) {
-            Button { dismiss() } label: {
-                Image(systemName: "xmark.circle.fill").font(.title2)
-                    .foregroundStyle(.white.opacity(0.5)).padding()
-            }
-            .buttonStyle(.plain).accessibilityLabel("Close")
+            CircleIconButton(label: "Close", systemImage: "xmark") { dismiss() }
+                .padding()
         }
         .preferredColorScheme(.dark)
     }

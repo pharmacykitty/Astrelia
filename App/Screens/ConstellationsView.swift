@@ -132,10 +132,8 @@ struct ConstellationsView: View {
     /// The collection picker plus a one-line description of the current collection.
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Picker("Collection", selection: $category) {
-                ForEach(FigureCatalog.allCases) { Text($0.rawValue).tag($0) }
-            }
-            .pickerStyle(.segmented)
+            LuminousSegmentedControl(selection: $category,
+                                     options: FigureCatalog.allCases.map { ($0, $0.rawValue) })
             Text(category.caption)
                 .font(.caption).foregroundStyle(.white.opacity(0.5))
                 .padding(.horizontal, 2)
@@ -167,8 +165,11 @@ private struct SkyFigureRow: View {
 
     var body: some View {
         HStack(spacing: 14) {
+            // Vertex dots ARE the figure's stars (the line geometry joins them), so
+            // each row reads as a tiny star chart instead of a faint wire.
             ConstellationFigure(polylines: figure.polylines, stars: [],
-                                lineColor: Theme.accent, lineWidth: 1, glow: false)
+                                lineColor: Theme.accent, lineWidth: 1.2, glow: false,
+                                vertexStars: true)
                 .frame(width: 64, height: 64)
                 .background { Circle().fill(.white.opacity(0.03)) }
                 .overlay { Circle().strokeBorder(.white.opacity(0.08), lineWidth: 1) }
@@ -300,7 +301,7 @@ private struct SkyFigureDetailView: View {
             }
             if let b = brightest {
                 DetailRow("Brightest star", StarFacts.displayName(for: b)
-                    + String(format: " · mag %.1f", b.apparentMagnitude))
+                    + " · mag \(StarFacts.mag(b.apparentMagnitude))")
             }
             DetailRow("Stars in view", "\(stars.count) to naked eye")
         }
@@ -359,6 +360,9 @@ struct ConstellationFigure: View {
     var lineColor: Color = .white
     var lineWidth: CGFloat = 1
     var glow: Bool = false
+    /// Draw a small star dot at every line vertex — for thumbnails, where the
+    /// catalog stars aren't loaded but the vertices are the figure's stars.
+    var vertexStars: Bool = false
 
     var body: some View {
         Canvas { context, size in
@@ -404,8 +408,20 @@ struct ConstellationFigure: View {
                 context.stroke(path, with: .color(lineColor.opacity(0.25)),
                                style: StrokeStyle(lineWidth: lineWidth * 3, lineCap: .round, lineJoin: .round))
             }
-            context.stroke(path, with: .color(lineColor.opacity(glow ? 0.85 : 0.7)),
+            context.stroke(path, with: .color(lineColor.opacity(glow ? 0.85 : 0.9)),
                            style: StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round))
+
+            // Thumbnail star dots at the vertices.
+            if vertexStars {
+                for line in polylines {
+                    for p in line {
+                        guard let pt = place(p) else { continue }
+                        context.fill(Path(ellipseIn: CGRect(x: pt.x - 1.4, y: pt.y - 1.4,
+                                                            width: 2.8, height: 2.8)),
+                                     with: .color(.white.opacity(0.9)))
+                    }
+                }
+            }
 
             // Labels for the brightest named stars (detail view only).
             if glow {

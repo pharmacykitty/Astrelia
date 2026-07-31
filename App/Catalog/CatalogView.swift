@@ -67,20 +67,20 @@ struct CatalogView: View {
         List {
             if isSearching {
                 let matches = matchingStars
-                disclosure("stars", title: "Stars", systemImage: "sparkle", tint: .yellow,
+                disclosure("stars", title: "Stars", systemImage: "sparkle", tint: Theme.gold,
                            count: matches.count) {
                     ForEach(matches, id: \.id) { star in starLink(star) }
                 }
             } else {
-                disclosure("notable", title: "Notable Stars", systemImage: "star.fill", tint: .yellow,
+                disclosure("notable", title: "Notable Stars", systemImage: "star.fill", tint: Theme.gold,
                            count: namedStars.count) {
                     ForEach(namedStars, id: \.id) { star in starLink(star) }
                 }
                 disclosure("constellations", title: "Stars by Constellation", systemImage: "sparkles",
-                           tint: .yellow, count: allStars.count) {
+                           tint: Theme.gold, count: allStars.count) {
                     ForEach(constellationGroups) { group in
                         disclosure("con.\(group.id)", title: group.name, systemImage: "star",
-                                   tint: .yellow.opacity(0.85), count: group.stars.count) {
+                                   tint: Theme.gold.opacity(0.85), count: group.stars.count) {
                             ForEach(group.stars, id: \.id) { star in starLink(star) }
                         }
                     }
@@ -265,7 +265,7 @@ struct CatalogView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(object.name ?? object.id)
                 Text([object.id, StarFacts.constellationName(object.constellation) ?? object.constellation,
-                      object.magnitude.map { String(format: "mag %.1f", $0) }]
+                      object.magnitude.map { "mag \(StarFacts.mag($0))" }]
                         .compactMap { $0 }.joined(separator: " · "))
                     .font(.caption).foregroundStyle(.secondary)
             }
@@ -276,10 +276,11 @@ struct CatalogView: View {
 
     private func starRow(_ star: Star) -> some View {
         let title = StarFacts.displayName(for: star)
+        let designation = StarFacts.formattedDesignation(star.bayerFlamsteed)
         let subtitle = [
-            star.bayerFlamsteed == title ? nil : star.bayerFlamsteed,
+            designation == title ? nil : designation,
             StarFacts.constellationName(star.constellation) ?? star.constellation,
-            String(format: "mag %.1f", star.apparentMagnitude),
+            "mag \(StarFacts.mag(star.apparentMagnitude))",
         ].compactMap { $0 }.joined(separator: " · ")
         return Label {
             VStack(alignment: .leading, spacing: 2) {
@@ -288,7 +289,7 @@ struct CatalogView: View {
             }
         } icon: {
             Image(systemName: star.properName != nil ? "sparkle" : "star")
-                .foregroundStyle(.yellow)
+                .foregroundStyle(Theme.gold)
         }
     }
 }
@@ -339,8 +340,9 @@ private struct StarDetailView: View {
     }
 
     var body: some View {
-        DetailScaffold(symbol: "sparkle", tint: .yellow, title: StarFacts.displayName(for: star),
-                       subtitle: [star.bayerFlamsteed == StarFacts.displayName(for: star) ? nil : star.bayerFlamsteed,
+        DetailScaffold(symbol: "sparkle", tint: Theme.gold, title: StarFacts.displayName(for: star),
+                       subtitle: [StarFacts.formattedDesignation(star.bayerFlamsteed) == StarFacts.displayName(for: star)
+                                    ? nil : StarFacts.formattedDesignation(star.bayerFlamsteed),
                                   StarFacts.constellationName(star.constellation)]
                         .compactMap { $0 }.joined(separator: " · ")) {
             if let pc = star.distanceParsecs {

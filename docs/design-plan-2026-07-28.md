@@ -1,5 +1,21 @@
 # Design plan — 2026-07-28 (screenshot-based)
 
+> **Status 2026-07-30: the first proposal round is built** (approved by Elysia on the
+> proposal artifact; before/after captures in `scratchshots/2026-07-30/` + `/after`).
+> Landed: **P1** (bare status — merged the duplicate status voice, luminous Sky/AR
+> capsule + the same component on the Constellations picker, night-ink `quietSurface`/
+> search field/calibration capsule, AR-only bottom scrim, bare bottom readout);
+> **P2** (persistent icons-only dock, fades while gazing, Menu button gone; `-dockOpen`
+> = pinned full opacity); the **deployment target is iOS 26** and the new dock/segment
+> capsules sit on `.glassEffect` (P3 for the *remaining* chrome — CircleIconButton,
+> sheets — still open); **P4.1–4.5** (live `MoonPhaseDisc`, sunrise glyph on the Night
+> card, `α CMa` Bayer formatting via `StarFacts.formattedDesignation`, `StarFacts.mag`
+> negative-zero fix, ink search capsule); **P5** (Cursa label clamp via safe insets,
+> `Theme.gold` sweep incl. About's Star Catalogs rim, thumbnail vertex stars +
+> stronger stroke, "Tonight" nav-title dedup, close buttons on `CircleIconButton`).
+> Still open below: P3's full sweep, P5's selection-card line-clamp, dock-label naming
+> ("Figures" vs "Constellations").
+
 A UI-designer pass over every reachable screen, captured in the simulator
 (`scratchshots/*.png` — sky, sky-dock, tonight, catalog, figures, about,
 star-detail, planet-detail, con3d, galaxy-orion, galaxy-bh). Follows the

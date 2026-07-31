@@ -354,7 +354,7 @@ struct GalaxyMapView: View {
 
     private func starDetail(_ star: GalaxyStar) -> String {
         let ly = star.distanceParsecs * 3.2616
-        var s = String(format: "%.1f ly · %.1f pc · mag %.1f", ly, star.distanceParsecs, star.magnitude)
+        var s = String(format: "%.1f ly · %.1f pc · mag %@", ly, star.distanceParsecs, StarFacts.mag(star.magnitude))
         if let c = star.constellation { s += " · \(c)" }
         return s
     }
@@ -374,17 +374,10 @@ struct GalaxyMapView: View {
             HStack {
                 Text(title).font(.title3.weight(.semibold)).foregroundStyle(.white)
                 Spacer()
-                Button { withAnimation(Theme.spring) { selection = nil } } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.title3)
-                        .foregroundStyle(.white.opacity(0.5))
-                        .frame(width: 44, height: 44)
-                        .contentShape(.rect)
+                CircleIconButton(label: "Dismiss \(title)", systemImage: "xmark") {
+                    withAnimation(Theme.spring) { selection = nil }
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Dismiss \(title)")
             }
-            .padding(.trailing, -10)   // pull the 44pt hit area back to the card edge
             Text(detail).font(.caption.monospacedDigit()).foregroundStyle(Theme.textSecondary)
             if let body {
                 Text(body).font(.caption).foregroundStyle(Theme.textSecondary).fixedSize(horizontal: false, vertical: true)
@@ -1333,7 +1326,8 @@ struct GalaxyMapView: View {
                 baseSize: max(0.6, CGFloat(7 - absoluteMagnitude) * 0.32),
                 magnitude: star.apparentMagnitude,
                 distanceParsecs: parsecs,
-                name: star.properName ?? star.bayerFlamsteed ?? star.hipparcos.map { "HIP \($0)" } ?? "Star \(star.id)",
+                name: star.properName ?? StarFacts.formattedDesignation(star.bayerFlamsteed)
+                    ?? star.hipparcos.map { "HIP \($0)" } ?? "Star \(star.id)",
                 constellation: star.constellation
             ))
         }

@@ -23,7 +23,12 @@ struct ContentView: View {
     // The destination dock (replaces the old full-screen menu): list screens
     // present as sheets over the live sky; the Galaxy Map is the one full-screen
     // immersion. The sky is the app — everything else is an overlay.
-    @State private var dockExpanded = ProcessInfo.processInfo.arguments.contains("-dockOpen")   // debug: snapshot the dock
+    // The dock is simply *there* (no reveal step); it fades while you're actively
+    // gazing — pinching the sky, or holding the phone raised in AR — and returns
+    // when you lower the phone or stop. `-dockOpen` (snapshots) pins full opacity.
+    @State private var dockDimmed = false
+    @State private var lastZoomInteraction = Date.distantPast
+    private var dockPinned: Bool { ProcessInfo.processInfo.arguments.contains("-dockOpen") }
     @State private var shownSheet: AppScreen?
     @State private var showGalaxyMap = false
     @State private var uiRotation = 0.0   // chrome rotation (degrees) to stay upright as the phone tilts
@@ -104,8 +109,12 @@ struct ContentView: View {
                     }
                 }
 
-                reticle
-                    .accessibilityHidden(true)
+                // Hidden while the status text occupies the centre — the ring
+                // otherwise strikes through the message.
+                if skyStatus == nil {
+                    reticle
+                        .accessibilityHidden(true)
+                }
 
                 // Sky taps/zoom, below the chrome.
                 Color.clear
@@ -144,6 +153,7 @@ struct ContentView: View {
             while !Task.isCancelled {
                 updateInterfaceRotation()      // responsive: chrome must track tilt promptly
                 updateAutoCalibration()
+                updateDockFade()
                 // The star field's horizontal coordinates drift on the sidereal
                 // timescale, so rebuilding the whole catalog 5×/s is wasteful — the
                 // per-frame motion is handled by the Canvas projection. Refresh calmly.
@@ -334,60 +344,84 @@ struct ContentView: View {
     /// Explains an empty sky instead of leaving it blank: the stars only render once
     /// location + motion + catalog are all ready. A fresh sideload resets the
     /// location permission, which otherwise silently empties the whole view.
-    private struct SkyStatus { let symbol: String; let message: String; let showSettings: Bool }
+    /// This is the ONE status voice — the bottom readout stays empty while it shows,
+    /// so the same words never appear twice on screen.
+    private struct SkyStatus {
+        let symbol: String
+        let message: String
+        var hint: String? = nil
+        var showSettings = false
+    }
 
     private var skyStatus: SkyStatus? {
         if !provider.isAuthorized {
             let denied = provider.authorization == .denied || provider.authorization == .restricted
             return SkyStatus(
                 symbol: "location.slash",
-                message: denied ? "Astrolabe needs location access to place the sky.\nEnable it in Settings."
+                message: denied ? "Astrolabe needs location access to place the sky."
                                 : "Allow location access so Astrolabe can compute your sky.",
+                hint: denied ? "Enable it in Settings." : nil,
                 showSettings: denied)
         }
         if !provider.hasLocation {
-            return SkyStatus(symbol: "location.magnifyingglass", message: "Finding your location…", showSettings: false)
+            return SkyStatus(symbol: "location.magnifyingglass", message: "Finding your location…")
         }
         if store.catalog == nil {
-            return SkyStatus(symbol: "sparkles", message: "Loading star catalog…", showSettings: false)
+            return SkyStatus(symbol: "sparkles", message: "Loading star catalog…")
         }
         if mode == .virtual && provider.rotationMatrix == nil {
-            return SkyStatus(symbol: "gyroscope", message: "Calibrating motion sensors…", showSettings: false)
+            return SkyStatus(symbol: "gyroscope", message: "Calibrating compass",
+                             hint: "Move the phone in a figure-8")
         }
         if mode == .ar {
+            if !ARCameraController.isSupported {
+                return SkyStatus(symbol: "video.slash", message: "AR isn't supported on this device.")
+            }
             switch AVCaptureDevice.authorizationStatus(for: .video) {
             case .denied, .restricted:
                 return SkyStatus(symbol: "video.slash",
-                                 message: "Camera access is needed for AR mode.\nEnable it in Settings.",
+                                 message: "Camera access is needed for AR mode.",
+                                 hint: "Enable it in Settings.",
                                  showSettings: true)
             default: break
             }
             if arController.currentFrame == nil {
-                return SkyStatus(symbol: "camera.viewfinder", message: "Starting AR camera…", showSettings: false)
+                return SkyStatus(symbol: "camera.viewfinder", message: "Starting AR camera…")
             }
         }
         return nil
     }
 
+    /// Bare floating text, no plate: boxes read as widgets, bare shadowed text
+    /// reads as an instrument — and it survives far busier backgrounds than this
+    /// (the galaxy map floats text over the lensed galactic core).
     @ViewBuilder
     private var skyStatusOverlay: some View {
         if let status = skyStatus {
-            VStack(spacing: 14) {
-                LuminousGlyph(symbol: status.symbol, tint: Theme.accent, size: 72, glyphSize: 32)
+            VStack(spacing: 10) {
+                Image(systemName: status.symbol)
+                    .font(.system(size: 30, weight: .medium))
+                    .foregroundStyle(Theme.accent)
+                    .shadow(color: Theme.accent.opacity(0.8), radius: 12)
                 Text(status.message)
-                    .font(.callout).multilineTextAlignment(.center)
-                    .foregroundStyle(.white.opacity(0.85))
+                    .font(.callout.weight(.medium)).multilineTextAlignment(.center)
+                    .foregroundStyle(.white)
+                if let hint = status.hint {
+                    Text(hint)
+                        .font(.footnote).multilineTextAlignment(.center)
+                        .foregroundStyle(Theme.textSecondary)
+                }
                 if status.showSettings {
                     Button("Open Settings") {
                         if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
                     }
                     .buttonStyle(LuminousButtonStyle())
+                    .padding(.top, 6)
                 } else {
-                    ProgressView().tint(Theme.accent).padding(.top, 2)
+                    ProgressView().tint(Theme.accent).padding(.top, 4)
                 }
             }
-            .padding(28)
-            .luminousSurface(Theme.accent, cornerRadius: Theme.panelRadius, glow: 16)
+            .shadow(color: .black.opacity(0.8), radius: 2, y: 1)
             .padding(40)
         }
     }
@@ -411,9 +445,7 @@ struct ContentView: View {
                 StarColorLegend().transition(Theme.slide(from: .bottom))
             }
 
-            if dockExpanded {
-                destinationDock.transition(Theme.slide(from: .bottom))
-            }
+            destinationDock
 
             // Live readout, refreshed calmly (kept out of the 60fps render loop).
             TimelineView(.periodic(from: .now, by: 0.25)) { _ in
@@ -432,23 +464,25 @@ struct ContentView: View {
         // readout to the physical bottom, hugging whichever way the phone is tilted.
         .frame(width: landscape ? size.height : size.width,
                height: landscape ? size.width : size.height)
+        // The camera feed needs help behind the bottom readout; the virtual sky
+        // doesn't — so the scrim is AR-only, hugging the physical bottom edge.
+        .background(alignment: .bottom) {
+            if mode == .ar {
+                LinearGradient(colors: [.clear, .black.opacity(0.55)],
+                               startPoint: .top, endPoint: .bottom)
+                    .frame(height: 220)
+                    .allowsHitTesting(false)
+            }
+        }
         .rotationEffect(.degrees(uiRotation))
         .frame(width: size.width, height: size.height)
     }
 
     private var controlBar: some View {
         HStack(spacing: 12) {
-            CircleIconButton(label: "Menu", systemImage: "square.grid.2x2", isActive: dockExpanded) {
-                withAnimation(Theme.spring) { dockExpanded.toggle() }
-            }
-            Spacer()
-            Picker("Mode", selection: $mode.animation(Theme.spring)) {
-                Text("Sky").tag(SkyMode.virtual)
-                Text("AR").tag(SkyMode.ar)
-            }
-            .pickerStyle(.segmented)
-            .frame(width: 132)
-            .sensoryFeedback(.selection, trigger: mode)
+            LuminousSegmentedControl(selection: $mode.animation(Theme.spring),
+                                     options: [(.virtual, "Sky"), (.ar, "AR")])
+                .frame(width: 148)
             Spacer()
             CircleIconButton(label: "Time travel", systemImage: isTimeShifted ? "clock.arrow.2.circlepath" : "clock",
                              tint: .cyan, isActive: showTimeScrubber || isTimeShifted) {
@@ -458,37 +492,49 @@ struct ContentView: View {
         }
     }
 
-    /// The destination dock: the app's places in one glass capsule over the sky.
+    /// The destination dock: the app's places, always present in the thumb zone —
+    /// icons only, one slim night-ink capsule. It recedes (not hides) while you're
+    /// gazing; VoiceOver labels carry the names the icons no longer print.
     private var destinationDock: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 10) {
             ForEach(AppScreen.allCases) { screen in
                 Button {
-                    withAnimation(Theme.spring) { dockExpanded = false }
                     open(screen)
                 } label: {
-                    VStack(spacing: 5) {
-                        Image(systemName: screen.symbol)
-                            .font(.system(size: 19, weight: .medium))
-                            .foregroundStyle(screen.tint)
-                            .frame(width: 42, height: 42)
-                            .background { Circle().fill(.white.opacity(0.06)) }
-                            .overlay { Circle().strokeBorder(screen.tint.opacity(0.4), lineWidth: 1) }
-                        Text(screen.title)
-                            .font(.caption2)
-                            .foregroundStyle(Theme.textSecondary)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .contentShape(.rect)
+                    Image(systemName: screen.symbol)
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(screen.tint)
+                        .frame(width: 36, height: 36)
+                        .background { Circle().fill(.white.opacity(0.05)) }
+                        .overlay { Circle().strokeBorder(screen.tint.opacity(0.45), lineWidth: 1) }
+                        .shadow(color: screen.tint.opacity(0.35), radius: 6)
+                        // The visual circle is 36pt but the tap target stays 44.
+                        .frame(width: Theme.controlSize, height: Theme.controlSize)
+                        .contentShape(.circle)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(screen.title)
                 .accessibilityHint(screen.subtitle)
             }
         }
-        .padding(.horizontal, 10).padding(.vertical, 10)
-        .luminousSurface(Theme.accent, cornerRadius: Theme.panelRadius, glow: 8)
+        .padding(.horizontal, 8).padding(.vertical, 2)
+        .glassEffect(.regular.tint(Theme.nightInk.opacity(0.5)), in: .capsule)
+        .overlay { Capsule().strokeBorder(.white.opacity(0.12), lineWidth: 0.5) }
+        .shadow(color: Theme.accent.opacity(0.12), radius: 10)
+        .opacity(dockDimmed && !dockPinned ? 0.25 : 1)
+        .animation(Theme.spring, value: dockDimmed)
+    }
+
+    /// The dock recedes while you're actively gazing: mid-pinch (and shortly
+    /// after), or in AR while the phone is raised near-vertical toward the sky.
+    /// Called from the calm 200 ms tick, never per frame.
+    private func updateDockFade() {
+        var dimmed = Date().timeIntervalSince(lastZoomInteraction) < 1.2
+        if mode == .ar, let gravity = provider.gravity {
+            // Screen near-vertical (gravity mostly in the screen plane) = raised.
+            dimmed = dimmed || abs(gravity.z) < 0.35
+        }
+        if dimmed != dockDimmed { dockDimmed = dimmed }
     }
 
     private func open(_ screen: AppScreen) {
@@ -567,19 +613,13 @@ struct ContentView: View {
                 }
             }
             Spacer()
-            Button { withAnimation(Theme.spring) { self.selection = nil } } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.title3)
-                    .foregroundStyle(.white.opacity(0.5))
-                    .frame(width: 44, height: 44)
-                    .contentShape(.rect)
+            CircleIconButton(label: "Dismiss \(selection.title)", systemImage: "xmark") {
+                withAnimation(Theme.spring) { self.selection = nil }
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Dismiss \(selection.title)")
         }
         .padding(.leading, 12)
-        .padding(.trailing, 2)
-        .padding(.vertical, 2)
+        .padding(.trailing, 8)
+        .padding(.vertical, 8)
         .luminousSurface()
     }
 
@@ -617,44 +657,45 @@ struct ContentView: View {
                     Text("auto · tap to refine").font(.caption).foregroundStyle(Theme.textTertiary)
                 }
             }
-            .padding(10).background(.ultraThinMaterial, in: .capsule)
+            .padding(10).background(Theme.nightInk.opacity(0.55), in: .capsule)
+            .overlay { Capsule().strokeBorder(.white.opacity(0.12), lineWidth: 0.5) }
             .sensoryFeedback(.success, trigger: manuallyCalibrated)
         }
     }
 
+    /// The live readout floats bare over the night — passive text gets no plate
+    /// (the AR scrim in `chrome` carries legibility over the camera feed). While
+    /// `skyStatus` is showing it stays empty, so status text never appears twice.
     @ViewBuilder
     private func bottomPanel(_ state: SolarState?) -> some View {
-        VStack(spacing: 10) {
-            if let state {
+        if let state, skyStatus == nil {
+            VStack(spacing: 5) {
+                // One compact guidance line for both bodies — the turn-hint arrows
+                // are the payload; each body's raw az/alt was chrome bloat (where
+                // *you* point is already the line below).
                 if filters.showSunMoon {
-                    ForEach(state.bodies) { body in bodyRow(body) }
-                    Divider().overlay(.white.opacity(0.2))
+                    HStack(spacing: 16) {
+                        ForEach(state.bodies) { body in bodyHint(body) }
+                    }
                 }
                 Text(String(format: "Pointing  %@ %.0f°  ·  alt %+.0f°",
                             compass(state.pointing.azimuth),
                             state.pointing.azimuth.degrees, state.pointing.altitude.degrees))
                     .font(.caption.monospacedDigit()).foregroundStyle(Theme.textSecondary)
-            } else {
-                Text(statusMessage).font(.callout).multilineTextAlignment(.center)
-                    .foregroundStyle(.white.opacity(0.85))
             }
+            .shadow(color: .black.opacity(0.8), radius: 2, y: 1)
+            .padding(.horizontal, 6).padding(.vertical, 4)
         }
-        .padding(14)
-        .quietSurface()
     }
 
-    private func bodyRow(_ body: ProjectedBody) -> some View {
+    private func bodyHint(_ body: ProjectedBody) -> some View {
         let inView = abs(body.deltaAzimuth) < 12 && abs(body.deltaAltitude) < 12
-        return HStack(spacing: 10) {
-            Circle().fill(body.color).frame(width: 9, height: 9)
-            Text(body.name).font(.subheadline.weight(.medium)).foregroundStyle(.white)
-            Spacer()
-            Text(String(format: "az %.0f° alt %+.0f°", body.azimuth.degrees, body.altitude.degrees))
-                .font(.caption.monospacedDigit()).foregroundStyle(Theme.textTertiary)
+        return HStack(spacing: 6) {
+            Circle().fill(body.color).frame(width: 7, height: 7)
+            Text(body.name).font(.caption.weight(.semibold)).foregroundStyle(.white)
             Text(inView ? "● here" : turnHint(body))
                 .font(.caption.monospacedDigit().weight(.semibold))
                 .foregroundStyle(inView ? .green : .white.opacity(0.85))
-                .frame(width: 92, alignment: .trailing)
         }
     }
 
@@ -664,6 +705,7 @@ struct ContentView: View {
         MagnifyGesture()
             .onChanged { value in
                 if mode == .virtual { fieldOfView = min(95, max(18, zoomAnchor / value.magnification)) }
+                lastZoomInteraction = Date()   // the dock recedes while you gaze
             }
             .onEnded { _ in zoomAnchor = fieldOfView }
     }
@@ -804,7 +846,7 @@ struct ContentView: View {
                     direction: worldDirection(azimuth: horizon.azimuth, altitude: horizon.altitude),
                     magnitude: star.apparentMagnitude,
                     color: starColor(star.colorIndex),
-                    label: star.properName ?? star.bayerFlamsteed))
+                    label: star.properName ?? StarFacts.formattedDesignation(star.bayerFlamsteed)))
             }
             points.sort { $0.magnitude < $1.magnitude }
             sky.starField = points
@@ -993,16 +1035,6 @@ struct ContentView: View {
         return "\(horizontal) \(vertical)"
     }
 
-    private var statusMessage: String {
-        if mode == .ar && !ARCameraController.isSupported { return "AR isn't supported on this device." }
-        if !provider.isAuthorized && provider.authorization != .notDetermined {
-            return "Location access is off — enable it in Settings to map your sky."
-        }
-        if !provider.hasLocation { return "Finding your location…" }
-        if mode == .ar { return "Starting camera…" }
-        return "Calibrating compass — move the phone in a figure-8."
-    }
-
     private func signedDelta(_ degrees: Double) -> Double {
         (degrees + 540).truncatingRemainder(dividingBy: 360) - 180
     }
@@ -1086,8 +1118,9 @@ private struct StarSelection {
     let detail: String?
 
     init(star: Star) {
-        title = star.properName ?? star.bayerFlamsteed ?? star.hipparcos.map { "HIP \($0)" } ?? "Star \(star.id)"
-        var parts = [String(format: "mag %.1f", star.apparentMagnitude)]
+        title = star.properName ?? StarFacts.formattedDesignation(star.bayerFlamsteed)
+            ?? star.hipparcos.map { "HIP \($0)" } ?? "Star \(star.id)"
+        var parts = ["mag \(StarFacts.mag(star.apparentMagnitude))"]
         if let constellation = StarFacts.constellationName(star.constellation) ?? star.constellation {
             parts.append(constellation)
         }

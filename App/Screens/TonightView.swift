@@ -39,7 +39,8 @@ struct TonightView: View {
                 .padding(.bottom, 40)
             }
         }
-        .navigationTitle("Tonight")
+        // No nav-bar title: the serif "Tonight's Sky" hero owns the name — a bar
+        // saying "Tonight" directly above it printed the word twice.
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { if fixedLocation == nil { observer.start() } }
         .onDisappear { observer.stop() }
@@ -83,8 +84,9 @@ struct TonightView: View {
 
     private func moonCard(_ phase: MoonPhase, _ moon: SkyBodyStatus) -> some View {
         HStack(spacing: 14) {
-            Image(systemName: moonSymbol(phase))
-                .font(.system(size: 40)).foregroundStyle(.white.opacity(0.9))
+            MoonPhaseDisc(fraction: phase.illuminatedFraction, waxing: phase.isWaxing)
+                .frame(width: 46, height: 46)
+                .accessibilityHidden(true)   // the text beside it says the same
             VStack(alignment: .leading, spacing: 3) {
                 Text(phase.name).font(.headline).foregroundStyle(.white)
                 Text("\(Int((phase.illuminatedFraction * 100).rounded()))% lit · \(phase.isWaxing ? "waxing" : "waning")")
@@ -98,11 +100,18 @@ struct TonightView: View {
         .padding(14).luminousSurface(.indigo)
     }
 
+    /// The day/night card. At night the glyph is the *next* event — a sunrise on
+    /// the horizon, in a cooler dawn amber — not a blazing midday sun contradicting
+    /// the "Night" title beside it.
     private var sunCard: some View {
-        HStack(spacing: 14) {
-            Image(systemName: "sun.max.fill").font(.system(size: 34)).foregroundStyle(.orange)
+        let isUp = sun?.isUp == true
+        let dawnAmber = Color(red: 0.93, green: 0.71, blue: 0.45)
+        return HStack(spacing: 14) {
+            Image(systemName: isUp ? "sun.max.fill" : "sunrise.fill")
+                .font(.system(size: 34))
+                .foregroundStyle(isUp ? .orange : dawnAmber)
             VStack(alignment: .leading, spacing: 3) {
-                Text(sun?.isUp == true ? "The Sun is up" : "Night").font(.headline).foregroundStyle(.white)
+                Text(isUp ? "The Sun is up" : "Night").font(.headline).foregroundStyle(.white)
                 if let sun {
                     Text(sun.isUp ? (sun.nextSet.map { "Sets at \(time($0))" } ?? "")
                                   : (sun.nextRise.map { "Sunrise at \(time($0))" } ?? ""))
@@ -111,7 +120,7 @@ struct TonightView: View {
             }
             Spacer()
         }
-        .padding(14).luminousSurface(.orange)
+        .padding(14).luminousSurface(isUp ? .orange : .indigo)
     }
 
     @ViewBuilder
@@ -288,12 +297,70 @@ struct TonightView: View {
         return "to the \(points[i % 8])"
     }
 
-    private func moonSymbol(_ phase: MoonPhase) -> String {
-        let f = phase.illuminatedFraction
-        if f < 0.04 { return "moonphase.new.moon" }
-        if f > 0.96 { return "moonphase.full.moon" }
-        if f < 0.46 { return phase.isWaxing ? "moonphase.waxing.crescent" : "moonphase.waning.crescent" }
-        if f < 0.54 { return phase.isWaxing ? "moonphase.first.quarter" : "moonphase.last.quarter" }
-        return phase.isWaxing ? "moonphase.waxing.gibbous" : "moonphase.waning.gibbous"
+}
+
+/// The Moon drawn as it actually looks tonight — warm lunar surface, a few maria,
+/// and the terminator placed from the live `illuminatedFraction`/`isWaxing`
+/// (northern-hemisphere convention: a waxing Moon lights up from the right limb).
+/// The flat white disc this replaced was the one dead element on the screen.
+struct MoonPhaseDisc: View {
+    let fraction: Double   // illuminated fraction, 0…1
+    let waxing: Bool
+
+    var body: some View {
+        Canvas { context, size in
+            let radius = min(size.width, size.height) / 2 - 1
+            let center = CGPoint(x: size.width / 2, y: size.height / 2)
+            let discRect = CGRect(x: center.x - radius, y: center.y - radius,
+                                  width: radius * 2, height: radius * 2)
+            let disc = Path(ellipseIn: discRect)
+
+            // The lit surface: warm regolith with a soft top-left highlight.
+            context.fill(disc, with: .radialGradient(
+                Gradient(colors: [Color(red: 0.96, green: 0.93, blue: 0.86),
+                                  Color(red: 0.76, green: 0.73, blue: 0.66)]),
+                center: CGPoint(x: center.x - radius * 0.25, y: center.y - radius * 0.3),
+                startRadius: 0, endRadius: radius * 1.7))
+
+            // Maria — the familiar dark seas, fixed like the real near side.
+            var seas = context
+            seas.clip(to: disc)
+            let maria: [(x: Double, y: Double, r: Double)] = [
+                (-0.28, -0.30, 0.30), (0.16, -0.08, 0.24), (0.02, 0.32, 0.17),
+                (-0.42, 0.14, 0.15), (0.40, -0.42, 0.12),
+            ]
+            for sea in maria {
+                let r = radius * sea.r
+                seas.fill(Path(ellipseIn: CGRect(x: center.x + sea.x * radius - r,
+                                                 y: center.y + sea.y * radius - r,
+                                                 width: r * 2, height: r * 2)),
+                          with: .color(Color(red: 0.42, green: 0.43, blue: 0.48).opacity(0.30)))
+            }
+
+            // The shadow: dark half-disc plus/minus the terminator's half-ellipse.
+            let f = max(0, min(1, fraction))
+            if f < 0.995 {
+                let darkOnRight = !waxing
+                let darkHalf = disc.intersection(Path(CGRect(
+                    x: darkOnRight ? center.x : center.x - radius,
+                    y: center.y - radius, width: radius, height: radius * 2)))
+                let k = abs(1 - 2 * f)
+                let terminator = Path(ellipseIn: CGRect(x: center.x - radius * k, y: center.y - radius,
+                                                        width: radius * 2 * k, height: radius * 2))
+                let shadow: Path
+                if f >= 0.5 {   // gibbous: the terminator bites into the dark half
+                    shadow = darkHalf.subtracting(terminator)
+                } else {        // crescent: the shadow bulges across the midline
+                    let litHalf = CGRect(x: darkOnRight ? center.x - radius : center.x,
+                                         y: center.y - radius, width: radius, height: radius * 2)
+                    shadow = darkHalf.union(terminator.intersection(Path(litHalf)))
+                }
+                // Not quite black — the unlit limb keeps a breath of earthshine.
+                context.fill(shadow, with: .color(Color(red: 0.05, green: 0.06, blue: 0.11).opacity(0.93)))
+            }
+
+            context.stroke(disc, with: .color(.white.opacity(0.16)), lineWidth: 0.5)
+        }
+        .shadow(color: Color(red: 0.96, green: 0.93, blue: 0.86).opacity(0.35), radius: 8)
     }
 }

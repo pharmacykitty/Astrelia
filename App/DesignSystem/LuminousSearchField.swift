@@ -27,7 +27,9 @@ struct LuminousSearchField: View {
             }
         }
         .padding(.horizontal, 16).padding(.vertical, 12)
-        .background(.ultraThinMaterial, in: Capsule())
+        // Night ink, not neutral material: rows scrolling beneath dim to a shadow
+        // instead of ghosting legibly through a gray plate.
+        .background(Theme.nightInk.opacity(0.82), in: Capsule())
         .overlay { Capsule().strokeBorder(.white.opacity(0.14), lineWidth: 0.5) }
         .padding(.horizontal)
         .padding(.bottom, 6)

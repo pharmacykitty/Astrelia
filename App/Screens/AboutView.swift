@@ -134,7 +134,7 @@ struct SourceGroup: Identifiable {
 /// new dataset, library, or algorithm is introduced (see `CLAUDE.md` convention).
 enum SourceCatalog {
     static let groups: [SourceGroup] = [
-        SourceGroup(title: "Star Catalogs", tint: .yellow, entries: [
+        SourceGroup(title: "Star Catalogs", tint: Theme.gold, entries: [
             SourceEntry(name: "HYG Database",
                         detail: "~119k stars combining the Hipparcos, Yale Bright Star, and Gliese catalogs — proper names, positions, parallax distances, magnitudes, spectral types, and B−V colour. Compiled by David Nash (astronexus).",
                         license: "Public domain",
