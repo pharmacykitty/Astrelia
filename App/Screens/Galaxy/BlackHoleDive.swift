@@ -44,13 +44,14 @@ enum DivePhysics {
     /// Real Schwarzschild radius of Sgr A* (~4.3 M solar masses), in km.
     static let realRsKm = 1.27e7
     /// Newtonian-styled pull (rs³/s², stylised), tuned so the fall from 6 rs to
-    /// the horizon takes ~9 s even from rest.
-    static let gravity: Float = 3.1
+    /// the horizon takes ~9 s even from rest. (NASA's approach beats breathe;
+    /// 3.1 + the 3.4 fall cap crossed 6 rs → horizon in ~4 s.)
+    static let gravity: Float = 2.3
     /// Constant narrative descent inside the horizon: 1 rs → end in exactly 12.8 s.
     static var interiorRateRsPerS: Float { (1 - endRadiusRs) / Float(secondsToSingularity) }
     /// A hot approach shouldn't skip the show: entry speed is clamped (rs/s).
     static let maxEntrySpeedRsPerS: Float = 1.6
-    static let maxFallSpeedRsPerS: Float = 3.4
+    static let maxFallSpeedRsPerS: Float = 2.4
     /// Belt-and-braces: if integration ever stalls, the fly loop force-ends the dive.
     static let failsafeSeconds: TimeInterval = 90
 

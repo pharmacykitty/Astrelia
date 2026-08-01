@@ -357,6 +357,7 @@ final class GalaxyMetalRenderer: NSObject {
     private var frameCount = 0
     private var lastFPSLog = CACurrentMediaTime()
     private var lastDump: CFTimeInterval = 0
+    private var dumpIndex = 0
 
     private nonisolated static func writeDump(_ tex: MTLTexture, tag: String) {
         let w = tex.width, h = tex.height
@@ -710,9 +711,13 @@ final class GalaxyMetalRenderer: NSObject {
             }
 
             if dumpFrames, reduced, diveActive, let lensOut,
-               CACurrentMediaTime() - lastDump > 2.5 {
+               CACurrentMediaTime() - lastDump > 0.7 {
                 lastDump = CACurrentMediaTime()
-                let tag = String(format: "r%04.1f", diveNarrativeR)   // radius in rs
+                // Sub-second cadence + a monotonically unique tag (radius repeats
+                // once the narrative floors) so a whole dive can be reviewed as a
+                // filmstrip, not 2.5 s keyframes.
+                dumpIndex += 1
+                let tag = String(format: "%03d_r%04.2f", dumpIndex, diveNarrativeR)
                 cb.addCompletedHandler { _ in Self.writeDump(lensOut, tag: tag) }
             }
         } else {

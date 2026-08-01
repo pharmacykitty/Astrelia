@@ -119,16 +119,22 @@ static float4 bh_disc(float3 xp, float3 n, float rd, float rIn, float rOut,
     float phi01 = phi / (2.0 * M_PI_F) + 0.5;
     float band  = bh_pnoise(phi01 * 4.0 - time * omega * 6.7, 4.0, rd * 3.0);
     float band2 = bh_pnoise(phi01 * 8.0 - time * omega * 9.5 + 17.3, 8.0, rd * 7.0);
-    float texture = 0.30 + 0.85 * band + 0.35 * band2;
+    // Low floor: NASA's streams have BLACK between them — the gaps must both dim
+    // and transmit, or stacked lensed images fill everything to cream.
+    float texture = 0.12 + 0.95 * band + 0.35 * band2;
 
     float radial = pow(rIn / rd, 2.2);                     // emissivity falls off outward
     float beam = pow(clamp(dop, 0.25, 2.2), 3.0);          // beaming: white earns the centre only
     float3 shifted = col;
     shifted = mix(shifted * float3(1.0, 0.42, 0.22), shifted, saturate(dop));               // receding limb reddens + dims
     shifted = mix(shifted, shifted * float3(1.16, 1.05, 0.90) + 0.20, saturate(dop - 1.0)); // approaching limb whitens (warm, not blue)
-    float3 rgb = shifted * (radial * texture * beam) * grav * 1.6 * (1.0 + boost * 2.0);
+    // NASA SVS 14585 palette check (frame-by-frame, 2026-07-31): their frames are
+    // near-black with SATURATED red-orange fire in thin streams — white almost
+    // nowhere. Gain down (1.6 → 1.05) and saturation up (1.3 → 1.45): the fire
+    // stays fire, and the photon ring reads as the thin bright line it should be.
+    float3 rgb = shifted * (radial * texture * beam) * grav * 1.05 * (1.0 + boost * 2.0);
     float dlum = dot(rgb, float3(0.30, 0.55, 0.15));
-    rgb = max(float3(0.0), mix(float3(dlum), rgb, 1.3));   // saturation push toward the fire
+    rgb = max(float3(0.0), mix(float3(dlum), rgb, 1.45));  // saturation push toward the fire
 
     // Optically THICK (NASA's disc shows a single surface, not stacked layers):
     // high alpha kills the transmittance after the first crossing or two, so the
@@ -159,7 +165,7 @@ static float4 bh_post(float3 col, float a, float3 dir, float3 fwd, constant Lens
     float knee = saturate(u.beta * 1.5);
     if (knee > 0.001) {
         float lum = dot(col, float3(0.30, 0.55, 0.15));
-        col = mix(col, col / (1.0 + 0.45 * lum), knee);
+        col = mix(col, col / (1.0 + 0.85 * lum), knee);   // crush the cream, keep the fire
     }
     if (u.flash > 0.001) {                                 // the final white-out
         col = mix(col, float3(1.35), u.flash);
@@ -292,14 +298,25 @@ fragment float4 lens_fragment(LensVSOut in [[stage_in]],
             // luminous actor that lensing bends into arcs and rings around the
             // shadow — not a warm fog. Persists through the plunge (it's the show);
             // only a faint wide haze fades with speed and proximity.
-            float bandProfile = exp(-planeDist * planeDist * 35.0);
+            // Thin + dim (NASA: the band is a dusty grey-white ribbon on BLACK sky,
+            // not a cream flood — at 0.32 the wash filled whole dive frames).
+            float bandProfile = exp(-planeDist * planeDist * 55.0);
             float bandTex = 0.55 + 0.45 * bh_noise(float2(atan2(outDir.y, outDir.x) * 6.0,
                                                           planeDist * 14.0));
-            b.rgb += float3(0.72, 0.58, 0.42) * (0.32 * bandProfile * bandTex);
+            b.rgb += float3(0.66, 0.58, 0.48) * (0.16 * bandProfile * bandTex);
             float haze = exp(-planeDist * planeDist * 5.0) * 0.05
                        * (1.0 - 0.8 * saturate(u.beta / 0.7))
                        * saturate((length(hp) / u.rs - 5.0) / 15.0);
             b.rgb += float3(1.0, 0.82, 0.55) * haze;
+            // Dive tone knee on the bake: the map's warm nucleus glow lenses into
+            // big cream sheets mid-plunge (NASA's sky is a star band on black).
+            // Compress the bake's highlights as speed builds; parked views keep
+            // the map's own warm look untouched.
+            float bknee = saturate(u.beta * 1.4);
+            if (bknee > 0.001) {
+                float blum = dot(b.rgb, float3(0.30, 0.55, 0.15));
+                b.rgb = mix(b.rgb, b.rgb / (1.0 + 1.4 * blum), bknee);
+            }
             b.a = max(b.a, bandProfile * 0.5);
             bg = mix(bg, b.rgb, bakeW);
             bgA = mix(bgA, b.a, bakeW);
