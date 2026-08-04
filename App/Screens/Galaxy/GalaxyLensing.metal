@@ -92,7 +92,7 @@ static float2 bh_equirect(float3 d) {
 // Radial temperature ramp, Keplerian orbital Doppler (beaming + colour shift),
 // gravitational redshift, and a noise swirl advected at the orbital rate.
 static float4 bh_disc(float3 xp, float3 n, float rd, float rIn, float rOut,
-                      float time, float3 photonDir, float boost) {
+                      float time, float3 photonDir, float boost, float beamCap) {
     float3 e1 = normalize(cross(n, fabs(n.y) < 0.9 ? float3(0, 1, 0) : float3(1, 0, 0)));
     float3 e2 = cross(n, e1);
     float phi = atan2(dot(xp, e2), dot(xp, e1));
@@ -124,10 +124,15 @@ static float4 bh_disc(float3 xp, float3 n, float rd, float rIn, float rOut,
     float texture = 0.12 + 0.95 * band + 0.35 * band2;
 
     float radial = pow(rIn / rd, 2.2);                     // emissivity falls off outward
-    float beam = pow(clamp(dop, 0.25, 2.2), 3.0);          // beaming: white earns the centre only
+    // beamCap: the interior ramps this down (2.2 → ~1.15). Rays winding near the
+    // photon sphere cross the disc dozens of times, EACH at maximum beaming —
+    // uncapped, the magnified interior view accumulates luminance in the
+    // hundreds and floods flat white; no downstream tonemap can save that.
+    float dopC = clamp(dop, 0.25, beamCap);
+    float beam = pow(dopC, 3.0);                           // beaming: white earns the centre only
     float3 shifted = col;
-    shifted = mix(shifted * float3(1.0, 0.42, 0.22), shifted, saturate(dop));               // receding limb reddens + dims
-    shifted = mix(shifted, shifted * float3(1.16, 1.05, 0.90) + 0.20, saturate(dop - 1.0)); // approaching limb whitens (warm, not blue)
+    shifted = mix(shifted * float3(1.0, 0.42, 0.22), shifted, saturate(dopC));               // receding limb reddens + dims
+    shifted = mix(shifted, shifted * float3(1.16, 1.05, 0.90) + 0.20, saturate(dopC - 1.0)); // approaching limb whitens (warm, not blue)
     // NASA SVS 14585 palette check (frame-by-frame, 2026-07-31): their frames are
     // near-black with SATURATED red-orange fire in thin streams — white almost
     // nowhere. Gain down (1.6 → 1.05) and saturation up (1.3 → 1.45): the fire
@@ -143,29 +148,46 @@ static float4 bh_disc(float3 xp, float3 n, float rd, float rIn, float rOut,
     return float4(rgb, alpha);
 }
 
-// Post effects shared by every pixel (dive staging).
-static float4 bh_post(float3 col, float a, float3 dir, float3 fwd, constant LensUniforms& u) {
-    if (u.beta > 0.001) {                                  // Doppler headlight: ahead brightens/blue-shifts
-        float ahead = saturate(dot(dir, fwd));
-        float boost = 1.0 + u.beta * 1.1 * ahead * ahead * ahead;
-        col *= boost * mix(float3(1.0), float3(0.86, 0.94, 1.18), u.beta * ahead * 0.6);
-    }
-    if (u.redshiftG > 0.001) {                             // everything reddens and dies
-        // Hue-preserving: blend toward a warm ember of the pixel's own luminance
-        // and fade quadratically. The old channel-kill (col *= 1-r after a hard
-        // red remap) posterized the whole interior into olive/red bands.
+// NASA-fire tonemap for the disc's accumulated HDR light (SVS 14585): brightness
+// climbs a blackbody-style ramp — black → deep red → vivid orange → amber — and
+// earns WHITE only at photon-ring luminance. The old channel-wise knee scaled
+// R,G,B together, so stacked lensed crossings clipped into pale cream sheets;
+// mapping the luminance through a fire ramp keeps every bright pixel saturated.
+// A trace of the pixel's own hue survives (Doppler limb asymmetry stays visible).
+static float3 bh_fireTone(float3 rgb) {
+    float lum = dot(rgb, float3(0.30, 0.55, 0.15));
+    if (lum < 1e-5) return rgb;
+    float L = lum / (4.0 + lum);                           // filmic-ish; white needs lum ≳ 23
+    float3 ramp;
+    if (L < 0.35)      ramp = mix(float3(0.0),               float3(0.62, 0.07, 0.01), L / 0.35);
+    else if (L < 0.62) ramp = mix(float3(0.62, 0.07, 0.01),  float3(1.00, 0.42, 0.05), (L - 0.35) / 0.27);
+    else if (L < 0.85) ramp = mix(float3(1.00, 0.42, 0.05),  float3(1.02, 0.62, 0.22), (L - 0.62) / 0.23);
+    else               ramp = mix(float3(1.02, 0.62, 0.22),  float3(1.28, 1.20, 1.08), saturate((L - 0.85) / 0.15));
+    float3 hue = saturate(rgb / max(lum, 1e-5));
+    return ramp * mix(float3(1.0), hue, 0.30);
+}
+
+// Post effects shared by every pixel (dive staging). Disc light arrives already
+// fire-tonemapped (LDR); the headlight boost here applies to the BACKGROUND only
+// — the disc's own boost is folded in before its tonemap (bh_fireTone input).
+static float4 bh_post(float3 col, float a, float3 screenDir, float3 fwd, constant LensUniforms& u) {
+    if (u.redshiftG > 0.001) {                             // the interior death, centre-first
+        // Hamilton (JILA): deep inside, the fore/aft view redshifts and dies
+        // FIRST while the sideways sky stays bright and blueshifted — the outside
+        // universe's last light is a ring around your waist, not a uniform fade.
+        // Screen mapping: the frame centre (the illusory horizon ahead) embers
+        // and dies early; the tunnel walls at the frame edge survive longest,
+        // slightly cooled. Contrast-deepening ember (pow > 1 on luminance): dim
+        // light goes to black, bright filaments stay saturated — a flat linear
+        // blend turned the whole interior into one copper wall.
+        float axial = saturate(dot(screenDir, fwd));
+        axial *= axial;                                    // 1 at centre → 0 at the edge
+        float rG = u.redshiftG * mix(0.55, 1.0, axial);
         float lum = dot(col, float3(0.30, 0.55, 0.15));
-        col = mix(col, lum * float3(1.0, 0.42, 0.20), u.redshiftG * 0.75);
-        col *= 1.0 - u.redshiftG * u.redshiftG * 0.96;
-    }
-    // Speed-gated soft knee: mid-plunge the stacked boosts (disc images × beaming ×
-    // headlight) clip the whole frame to white — roll the wash off filmically while
-    // the photon ring stays white-hot. Inactive when parked (the static hole keeps
-    // its crisp look).
-    float knee = saturate(u.beta * 1.5);
-    if (knee > 0.001) {
-        float lum = dot(col, float3(0.30, 0.55, 0.15));
-        col = mix(col, col / (1.0 + 0.85 * lum), knee);   // crush the cream, keep the fire
+        float3 ember = pow(max(lum, 0.0), 1.6) * float3(1.15, 0.44, 0.18);
+        col = mix(col, ember, rG * 0.8);
+        col *= 1.0 - rG * rG * 0.96;
+        col = mix(col, col * float3(0.88, 0.96, 1.14), u.redshiftG * (1.0 - axial) * 0.5);
     }
     if (u.flash > 0.001) {                                 // the final white-out
         col = mix(col, float3(1.35), u.flash);
@@ -200,7 +222,8 @@ fragment float4 lens_fragment(LensVSOut in [[stage_in]],
         ndc = hndc + dv / stretch;
     }
 
-    float3 dir = normalize(fwd + right * (ndc.x * u.tanHalfW) + up * (ndc.y * u.tanHalfH));
+    float3 screenDir = normalize(fwd + right * (ndc.x * u.tanHalfW) + up * (ndc.y * u.tanHalfH));
+    float3 dir = screenDir;
     // Relativistic aberration, INVERSE map: negative β crowds the sky into view
     // (approach compression); positive warp MAGNIFIES the forward view. The
     // aperture rides the warp positive through the interior: the view plunges
@@ -246,7 +269,8 @@ fragment float4 lens_fragment(LensVSOut in [[stage_in]],
                 float3 xp = p - v * dt * (1.0 - f);
                 float rd = length(xp);
                 if (rd > rIn && rd < rOut) {
-                    float4 d = bh_disc(xp, n, rd, rIn, rOut, u.time, normalize(v), u.discBoost);
+                    float beamCap = mix(2.2, 1.15, saturate(u.aperture * 1.3));
+                    float4 d = bh_disc(xp, n, rd, rIn, rOut, u.time, normalize(v), u.discBoost, beamCap);
                     acc += d.rgb * d.a * trans;
                     trans *= 1.0 - d.a;
                     if (trans < 0.02) break;                // effectively opaque
@@ -286,8 +310,22 @@ fragment float4 lens_fragment(LensVSOut in [[stage_in]],
         float bakeW = max((1.0 - screenW) * bent, u.bakeMix);
         if (bakeW > 0.001) {
             // Wrap longitude so rays crossing the panorama's ±π seam stay continuous.
-            constexpr sampler wrapSmp(s_address::repeat, t_address::clamp_to_edge, filter::linear);
-            float4 b = skyTex.sample(wrapSmp, bh_equirect(outDir));
+            // Mip-filtered: auto derivatives pick the right level whether the warp
+            // magnifies (interior tunnel) or minifies (approach compression) the
+            // panorama — without mips the star sprites alias into blue confetti
+            // sheets mid-dive. The aperture bias adds a deliberate extra blur as
+            // the interior magnification grows.
+            constexpr sampler wrapSmp(s_address::repeat, t_address::clamp_to_edge,
+                                      filter::linear, mip_filter::linear);
+            float2 buv = bh_equirect(outDir);
+            // ANALYTIC mip level — never derivative-based: in the march zone
+            // neighbouring rays diverge chaotically, so auto-lod flips per pixel
+            // and sprays coloured grain. Two smooth terms instead: the dive state
+            // (magnified stars soften into round dots) and the bend amount
+            // (strongly-lensed sectors compress many images — blur matches that).
+            float dlod = saturate(max(u.aperture * 1.4, (u.beta - 0.15) * 1.3)) * 2.2;
+            float blod = saturate((1.0 - dot(outDir, dir)) * 3.0) * 2.5;
+            float4 b = skyTex.sample(wrapSmp, buv, level(clamp(dlod + blod, 0.0, 6.0)));
             // The bake resolves individual stars but under-samples the soft bulge
             // wash (its sprites shrink to true angular size); add the nucleus glow
             // procedurally — a warm band hugging the galactic plane — so strongly
@@ -303,7 +341,7 @@ fragment float4 lens_fragment(LensVSOut in [[stage_in]],
             float bandProfile = exp(-planeDist * planeDist * 55.0);
             float bandTex = 0.55 + 0.45 * bh_noise(float2(atan2(outDir.y, outDir.x) * 6.0,
                                                           planeDist * 14.0));
-            b.rgb += float3(0.66, 0.58, 0.48) * (0.16 * bandProfile * bandTex);
+            b.rgb += float3(0.66, 0.58, 0.48) * (0.12 * bandProfile * bandTex);
             float haze = exp(-planeDist * planeDist * 5.0) * 0.05
                        * (1.0 - 0.8 * saturate(u.beta / 0.7))
                        * saturate((length(hp) / u.rs - 5.0) / 15.0);
@@ -312,10 +350,14 @@ fragment float4 lens_fragment(LensVSOut in [[stage_in]],
             // big cream sheets mid-plunge (NASA's sky is a star band on black).
             // Compress the bake's highlights as speed builds; parked views keep
             // the map's own warm look untouched.
-            float bknee = saturate(u.beta * 1.4);
+            float bknee = saturate(u.beta * 1.8);
             if (bknee > 0.001) {
                 float blum = dot(b.rgb, float3(0.30, 0.55, 0.15));
                 b.rgb = mix(b.rgb, b.rgb / (1.0 + 1.4 * blum), bknee);
+                // NASA's sky is near-BLACK with a thin star ribbon: the knee alone
+                // left the magnified bulge glow as pale sheets — dim the whole bake
+                // hard as speed builds (parked views untouched, bknee = 0).
+                b.rgb *= 1.0 - 0.72 * bknee;
             }
             b.a = max(b.a, bandProfile * 0.5);
             bg = mix(bg, b.rgb, bakeW);
@@ -327,18 +369,41 @@ fragment float4 lens_fragment(LensVSOut in [[stage_in]],
         // can't rainbow-band.
         if (u.aperture > 0.001) {
             float lum = dot(bg, float3(0.30, 0.55, 0.15));
-            bg = mix(bg, lum * float3(1.0, 0.93, 0.80), saturate(u.aperture * u.aperture * 0.6));
+            // Mild warm wash only — the mip-filtered bake no longer rainbow-bands,
+            // and a strong wash flattened the whole interior into one copper tone.
+            bg = mix(bg, lum * float3(1.0, 0.93, 0.80), saturate(u.aperture * u.aperture * 0.3));
             bg *= 1.0 - 0.55 * u.aperture;
             bgA *= 1.0 - 0.4 * u.aperture;
         }
     }
 
-    float3 col = acc + bg * trans;
+    // Doppler headlight: the forward boost is folded into the disc's HDR light
+    // BEFORE its fire tonemap (so beaming brightens the fire along the ramp
+    // instead of re-clipping tonemapped values to cream); the background gets it
+    // in LDR with its own soft knee. The disc skips the blue tint — NASA's fire
+    // stays warm at every speed.
+    float ahead = saturate(dot(dir, fwd));
+    float head = u.beta > 0.001 ? 1.0 + u.beta * 1.1 * ahead * ahead * ahead : 1.0;
+    // The disc takes the headlight at half strength — mid-plunge every warped
+    // ray is near-forward, and the full boost just doubled the stacked images.
+    // PARKED, the disc keeps its raw HDR light (clipping at the target = the
+    // approved crisp orange disc + white-hot ring identity); the NASA-fire
+    // tonemap takes over as the dive builds speed — that's when stacked lensed
+    // images would otherwise flood the frame cream.
+    float3 fire = bh_fireTone(acc * (1.0 + (head - 1.0) * 0.55));
+    float3 discCol = mix(acc, fire, saturate(u.beta * 1.6));
+    float3 bgCol = bg * head * mix(float3(1.0), float3(0.86, 0.94, 1.18), u.beta * ahead * 0.6);
+    float bglum = dot(bgCol, float3(0.30, 0.55, 0.15));
+    bgCol = mix(bgCol, bgCol / (1.0 + 0.6 * bglum), saturate(u.beta * 1.5));
+
+    float3 col = discCol + bgCol * trans;
     // The shadow must be a solid black ball (not the UI gradient leaking through);
     // the disc adds its own coverage on top of whatever background survives.
     float a = captured ? 1.0 : max(bgA * trans, saturate(1.0 - trans));
 
-    float4 res = bh_post(col, a, dir, fwd, u);
+    // bh_post gets the SCREEN ray (pre-aberration): the interior's centre-vs-edge
+    // weighting is compositional — post-warp directions all crowd toward fwd.
+    float4 res = bh_post(col, a, screenDir, fwd, u);
     // Blue-noise-ish dither: the interior's long smooth ramps posterize on the
     // 8-bit reduced-res target without it.
     res.rgb += (bh_hash(in.uv * float2(u.viewW, u.viewH) + fract(u.time * 0.37) * 61.0) - 0.5)

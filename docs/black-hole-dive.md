@@ -87,6 +87,37 @@
 > `-dive` harness throttle 0.05 → 0.3 (the trigger took ~a minute to fire;
 > screenshots mid-"dive" were actually the stalled approach).
 >
+> **Palette + interior pass 2026-08-04** (sim-verified frame-by-frame, informed by a
+> research sweep over NASA SVS 14585, Hamilton/JILA interior visualizations, ScienceClic,
+> Riazuelo, oseiskar and the DNGR paper):
+> - **NASA-fire tonemap** (`bh_fireTone`): the disc's accumulated HDR light maps its
+>   luminance through a blackbody-style ramp (black → deep red → orange → amber; white
+>   only at photon-ring intensities, lum ≳ 23) with ~30% of the pixel's own hue kept
+>   (Doppler limb asymmetry survives). Replaces the channel-wise knee, which let stacked
+>   lensed crossings clip to cream sheets. **Parked, the raw HDR light is kept** (the
+>   approved crisp orange disc + white-hot ring); the tonemap crossfades in with β.
+> - **Doppler beam cap in the interior** (`beamCap` 2.2 → ~1.15 with aperture): rays
+>   winding near the photon sphere cross the disc dozens of times, each at max beaming —
+>   uncapped, the magnified interior accumulates luminance in the hundreds. The disc also
+>   takes the headlight boost at half strength (pre-tonemap), and the headlight now
+>   applies to disc and background separately.
+> - **Mipmapped sky bake** + ANALYTIC mip level (dive state + bend amount — never
+>   derivative-based auto-lod, which flips per pixel in the march zone and sprays
+>   coloured grain): magnified/minified panorama stars render as soft dots, not blue
+>   confetti. Bake dimmed hard as β builds (knee + 0.72 dim; parked untouched) — NASA's
+>   sky is near-black with a thin star ribbon.
+> - **Interior death is centre-first** (Hamilton: fore/aft redshifts and dies first, the
+>   sideways sky survives longest, slightly blueshifted): the redshift ember weights by
+>   screen-axial distance, the frame-edge streams cool subtly — the waist-band read
+>   within the tunnel composition. Ember is contrast-deepening (pow 1.6 on luminance:
+>   dim mush → black, filaments stay saturated) — the flat blend made a copper wall.
+> - Disc flare moved to the **photon-sphere crossing** (r = 1.5 rs, was 1.05).
+> - **`-dumpDive` writes OPAQUE PNGs now** (alpha flattened): the lens target's low
+>   interior alpha composites over the map's black backdrop on screen (the MTKView is
+>   non-opaque), but PNG viewers matte it over WHITE — the frames read as a white flood
+>   that isn't there, which misled a whole tuning session. The RGB channels are the
+>   ground truth; never judge dive dumps with alpha intact.
+>
 > **Not yet done:** on-device verification (trigger, perf, HUD liveness), Kerr spin /
 > frame-dragging, bake longitude-seam wrap, and the SwiftUI AttributeGraph wedge under
 > 60 Hz flight churn (pre-existing; the dive routes around it, manual free-fly on the

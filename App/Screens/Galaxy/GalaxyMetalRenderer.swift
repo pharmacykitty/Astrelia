@@ -366,6 +366,12 @@ final class GalaxyMetalRenderer: NSObject {
             tex.getBytes(buf.baseAddress!, bytesPerRow: w * 4,
                          from: MTLRegionMake2D(0, 0, w, h), mipmapLevel: 0)
         }
+        // Flatten alpha: on screen the (non-opaque) MTKView composites over the
+        // map's black backdrop, so the premultiplied RGB *is* what the user sees.
+        // Left in the PNG, viewers matte the low-alpha interior over WHITE and the
+        // frames read as a white flood that isn't there (this misled a whole
+        // tuning session — 2026-08-04).
+        for i in stride(from: 3, to: bytes.count, by: 4) { bytes[i] = 255 }
         guard let provider = CGDataProvider(data: Data(bytes) as CFData),
               let cg = CGImage(width: w, height: h, bitsPerComponent: 8, bitsPerPixel: 32,
                                bytesPerRow: w * 4, space: CGColorSpaceCreateDeviceRGB(),
@@ -556,8 +562,11 @@ final class GalaxyMetalRenderer: NSObject {
         guard camera.holeRs > 0, bakedVersion != loadedVersion,
               let device, let bakePipeline else { return }
         if skyBake == nil {
+            // Mipmapped: the lens pass samples this with auto-derivative mip
+            // filtering — without mips the panorama's star sprites alias into
+            // confetti whenever the dive warp magnifies or minifies the sky.
             let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm,
-                                                             width: 2048, height: 1024, mipmapped: false)
+                                                             width: 2048, height: 1024, mipmapped: true)
             d.usage = [.renderTarget, .shaderRead]
             d.storageMode = .private
             skyBake = device.makeTexture(descriptor: d)
@@ -584,6 +593,10 @@ final class GalaxyMetalRenderer: NSObject {
             enc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4, instanceCount: count)
         }
         enc.endEncoding()
+        if let blit = cb.makeBlitCommandEncoder() {
+            blit.generateMipmaps(for: skyBake)
+            blit.endEncoding()
+        }
         bakedVersion = loadedVersion
     }
 
