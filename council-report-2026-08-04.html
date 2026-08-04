@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Council Report — Black-Hole Dive Animation</title>
+<style>
+  :root { --ink:#1a1d23; --muted:#6b7280; --line:#e5e7eb; --accent:#b45309; --bg:#ffffff; --soft:#f9fafb; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+         line-height:1.55; }
+  .wrap { max-width:820px; margin:0 auto; padding:40px 24px 80px; }
+  h1 { font-size:1.5rem; margin:0 0 4px; }
+  .sub { color:var(--muted); font-size:.9rem; margin-bottom:28px; }
+  .question { background:var(--soft); border:1px solid var(--line); border-radius:10px;
+              padding:16px 20px; font-size:.95rem; margin-bottom:32px; }
+  .question b { color:var(--accent); }
+  h2 { font-size:1.05rem; margin:34px 0 10px; border-bottom:1px solid var(--line); padding-bottom:6px; }
+  .verdict h3 { font-size:.95rem; color:var(--accent); margin:22px 0 6px; }
+  .verdict p, .verdict li { font-size:.95rem; }
+  .onething { border:2px solid var(--accent); border-radius:10px; padding:14px 18px;
+              background:#fffbeb; margin-top:18px; font-size:.95rem; }
+  table { border-collapse:collapse; width:100%; font-size:.85rem; margin:14px 0; }
+  th, td { border:1px solid var(--line); padding:7px 9px; text-align:center; }
+  th { background:var(--soft); font-weight:600; }
+  td.claim { text-align:left; }
+  .y { color:#15803d; font-weight:700; }
+  .n { color:#b91c1c; font-weight:700; }
+  .p { color:#a16207; font-weight:700; }
+  details { border:1px solid var(--line); border-radius:8px; margin:10px 0; padding:0; }
+  summary { cursor:pointer; padding:11px 16px; font-weight:600; font-size:.92rem; }
+  summary:hover { background:var(--soft); }
+  details > div { padding:2px 18px 14px; font-size:.92rem; border-top:1px solid var(--line); }
+  .tag { display:inline-block; font-size:.72rem; padding:2px 8px; border-radius:99px;
+         background:var(--soft); border:1px solid var(--line); color:var(--muted); margin-left:8px; }
+  footer { margin-top:48px; color:var(--muted); font-size:.8rem; border-top:1px solid var(--line); padding-top:14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>Council Report: the Black-Hole Dive</h1>
+<div class="sub">5 advisors · 5 anonymous peer reviews · chairman synthesis — 2026-08-04</div>
+
+<div class="question">
+<b>The question:</b> As a piece of interactive art claiming NASA-grade inspiration — is the
+Sgr A* dive compelling and legible as "falling into a black hole"? Where is it weak, what
+would elevate it to a marquee moment, and is the interior's long dark stretch a strength
+or a liability? <span class="tag">Judged from a 12-frame rendered filmstrip + the parked view</span>
+</div>
+
+<h2>Chairman's Verdict</h2>
+<div class="verdict">
+
+<h3>Where the Council Agrees</h3>
+<p>Four of five advisors converged independently on the same core defect, verified against
+the frames: <b>from the first dive frame onward, the universe is gone.</b> No stars, no lensed
+galaxy, no dusty ribbon — only fire streams on black — while the parked view is starry, gold,
+and alive. The story the sequence claims ("the universe dies around you") cannot be told
+because the universe was deleted at frame 1, not at the horizon. NASA SVS 14585 is legible
+<i>because</i> its thin Milky Way ribbon anchors the fire.</p>
+<p>Also agreed: <b>the approach run (r5.95 → r2.34) is visually excellent</b> — poster-grade;
+don't rip it up, amend it. <b>The r0.60 → r0.32 stretch will read as a frozen app</b> on a real
+phone (glare, auto-brightness, the "did it crash?" reflex — users hit Skip as the climax loads).
+And the uncomfortable one: <b>the parked view currently outshines the marquee dive.</b></p>
+
+<h3>Where the Council Clashes</h3>
+<p><b>Dark stretch — liability or asset?</b> The Expansionist: near-black on OLED is the asset —
+pixels physically off, "the phone becomes the event horizon." Everyone else: crash screen.
+Both describe true things in different viewing conditions. The First Principles Thinker resolves
+it: <b>the darkness is right; the emptiness is the liability.</b> Don't brighten it — give it one
+thing to lose.</p>
+<p><b>Brighten vs. populate.</b> The Executor wants luminance engineering (ember floor ~3%);
+the First Principles Thinker wants narrative engineering (a surviving patch of sideways sky whose
+extinction <i>is</i> the countdown). Not exclusive — the verdict takes both.</p>
+<p><b>What is "the moment"?</b> The Contrarian: the horizon crossing is currently invisible —
+it happens only in a HUD caption. The Expansionist: the moment is the shareable receipt after
+the flash. The Contrarian's point is upstream: nobody shares a receipt for an event they didn't
+perceive.</p>
+
+<h3>Blind Spots the Council Caught</h3>
+<ul>
+<li>The Expansionist's response was built on an unverified core — flagged by every reviewer. Share cards and a Cyg X-1 dive are good roadmap items <i>after</i> the sequence is legible.</li>
+<li><b>Photosensitivity is a ship gate:</b> a full-frame white flash out of seconds of near-black needs a Reduce Motion / flash-mitigation path. Four of five reviewers caught what no advisor did.</li>
+<li><b>Sound is undesigned.</b> A redshifting drone dying with the light is the cheapest legibility channel on a phone.</li>
+<li><b>Discoverability:</b> a marquee moment gated behind free-flying to ~6 rs may never be found.</li>
+<li><b>Motion evidence:</b> verdicts about tumbling, duplicate beats, and dead air hinge on pacing that stills can't show — capture video before shader surgery on those points.</li>
+<li><b>Interruption:</b> what does a phone call do to a renderer-owned 20-second sequence?</li>
+</ul>
+
+<h3>The Recommendation</h3>
+<p>The dive is a technically real, palette-correct rendering that fails as <i>storytelling</i>
+for one root-cause reason: <b>it has no referent.</b> Falling is only legible as the loss of
+something. In priority order, all within the hard constraints:</p>
+<ol>
+<li><b>Restore the universe to the dive</b> — sample the existing baked equirect: faint lensed stars streaming past on approach; Hamilton's surviving sideways sky as a thin edge patch of starlight guttering out through r0.6 → r0.3. Its extinction becomes the interior's progress signal.</li>
+<li><b>Mark the horizon crossing visually</b> — one distinct optical event, not just a HUD caption.</li>
+<li><b>Floor the embers (~3% until the final second)</b> and gate on-device at 25% brightness.</li>
+<li><b>Ship-gate the flash:</b> warm-capped, with a Reduce Motion path (accessibility, not polish).</li>
+<li><b>Carry the darkness on non-visual channels:</b> CoreHaptics heartbeat decaying to nothing + a redshifting audio drone.</li>
+</ol>
+<p>Defer but keep: the epilogue share card and the Cygnus X-1 contrast dive. The dark-stretch
+question, answered directly: <b>keep the darkness, kill the emptiness.</b></p>
+
+<div class="onething"><b>The one thing to do first:</b> add the surviving sideways-sky patch to
+the interior — the existing baked equirect sampled into a thin edge region of faint stars that
+redden and gutter out across r0.6 → r0.3, timed so the last star dies at the flash. Root-cause
+fix, existing asset, respects every constraint; everything else lands better once the universe
+exists to be lost.</div>
+</div>
+
+<h2>Where the Advisors Stood</h2>
+<table>
+<tr><th class="claim">Claim</th><th>Executor</th><th>First&nbsp;Principles</th><th>Contrarian</th><th>Expansionist</th><th>Outsider</th></tr>
+<tr><td class="claim">Missing referent — no stars/universe in the dive</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="n">—</td><td class="y">✓</td></tr>
+<tr><td class="claim">Approach run (r5.95→r2.34) is excellent</td><td class="y">✓</td><td class="p">partial</td><td class="n">✗</td><td class="y">✓</td><td class="y">✓</td></tr>
+<tr><td class="claim">Dark stretch is a liability as shipped</td><td class="y">✓</td><td class="p">nuanced</td><td class="y">✓</td><td class="n">asset</td><td class="y">✓</td></tr>
+<tr><td class="claim">Parked view outshines the dive</td><td class="n">—</td><td class="p">implied</td><td class="y">✓</td><td class="p">reveal</td><td class="y">✓</td></tr>
+<tr><td class="claim">Horizon crossing is visually unmarked</td><td class="n">—</td><td class="n">—</td><td class="y">✓</td><td class="n">—</td><td class="n">—</td></tr>
+</table>
+<p style="font-size:.85rem;color:var(--muted)">Peer review: the First Principles Thinker was voted
+strongest by 4 of 5 reviewers (the Contrarian by the fifth, and named "best individual catch" twice);
+the Expansionist was named the biggest blind spot by all 5.</p>
+
+<h2>Full Advisor Responses</h2>
+
+<details><summary>The Contrarian <span class="tag">voted strongest ×1 · "best individual catch" ×2</span></summary><div>
+<p>The fatal flaw: the horizon crossing — your headline physics beat — is invisible. r2.34 and r0.97 speak the same visual vocabulary: black mass, orange band on one side. A lay user will never know the one thing worth telling friends about ("I crossed an event horizon") happened, except by reading a HUD caption. Nothing in the imagery marks it.</p>
+<p>Second: there is no sky anywhere. Your own science note says the sideways sky survives longest (Hamilton), and the frame calls out an Einstein-lensed galaxy — yet not a single star or ribbon appears in any of the 12 frames. Without stars there's no scale, no parallax, no "falling"; r5.95→r3.56 read as abstract lava-lamp gradients that could be a shampoo ad. NASA 14585 is legible <i>because</i> the thin dusty ribbon anchors the fire.</p>
+<p>Third, the composition wanders instead of converging. The "tunnel plunge" claim implies the shadow swallowing the frame outward from centre; what I see is a one-sided band drifting — top-left at r0.97, left at r0.74, diagonal at r0.60, top at r0.46. In motion that risks reading as tumbling, not plunging.</p>
+<p>The dark stretch r0.60→r0.32 is a liability, full stop. r0.46 and r0.32 are ~95% black; on a phone in daylight that's a frozen app, and users will hit Skip precisely when your climax is loading. The flash at r0.17 then arrives unearned — white out of nothing.</p>
+<p>Hardest truth: parked70c is more spectacular than the dive. Your everyday view outshines your marquee moment. Fix priorities: a distinct visual event at the crossing, surviving lensed stars through the interior, centred convergence, and an ember floor so the screen never reads as dead.</p>
+</div></details>
+
+<details><summary>The First Principles Thinker <span class="tag">voted strongest ×4</span></summary><div>
+<p>Strip the question to its physics: "falling in" is only legible as <i>loss of a referent</i>. A fall you can't measure isn't a fall — it's abstract art. And that's the failure across this filmstrip: from r5.95 onward there is not a single star, no lensed galaxy, no dusty ribbon — nothing that is <i>the universe you left</i>. Compare parked70c: gold, starry, alive. The moment the dive triggers, that world simply ceases. So the story the sequence claims — "the universe dies around you" — cannot be told, because the universe was deleted at frame 1, not at the horizon. The NASA reference you cite has a thin Milky Way ribbon precisely because you need something real to watch get devoured.</p>
+<p>Second failure of measurement: r0.74, r0.60, r0.46, r0.32 are compositionally the same frame at decreasing brightness. Shuffle them and a lay user couldn't order them. The interior has no progress signal except the HUD, and numbers aren't visceral.</p>
+<p>This answers your dark-stretch question directly: the darkness is right — the <i>emptiness</i> is the liability. Don't brighten it; give it one thing to lose. You already cite Hamilton: the sideways sky survives longest. Put that on screen — a single surviving patch of starlight at the frame edge (forward composition, not the forbidden dome), reddening and guttering through r0.6→r0.3, its extinction <i>being</i> the countdown, embers dying with it. Then the r0.17 flash is earned as the first light after the last light — though full-frame white from pure black on OLED at night will physically hurt; cap it warm.</p>
+<p>Also: the shadow already fills the frame at r5.95, so the approach spends "it swallows the sky" before the dive begins. Let frames r5.95–r2.34 keep visible lensed stars streaming past — growth needs witnesses.</p>
+</div></details>
+
+<details><summary>The Expansionist <span class="tag">named biggest blind spot ×5</span></summary><div>
+<p>The approach run (r5.95 → r2.34) is already poster-grade — those four frames ARE your App Store screenshots and launch trailer. Stop thinking "easter egg"; this is the acquisition engine. The tell-your-friends moment doesn't need more light, it needs an exit ramp for the story: after the flash (r0.17), hand the user a shareable epilogue card — "You survived 12.8 seconds inside Sagittarius A*" with their peak velocity and dilation factor — plus a one-tap replay-as-video export. People don't share shaders; they share receipts.</p>
+<p>The long dark stretch (r0.60 → r0.32) is being undervalued as a liability when it's your biggest asset on the exact hardware you ship to: OLED. Near-black frames mean the pixels physically turn off — the user's phone <i>becomes</i> the event horizon, in their hand, in a dark room. No desktop visualization can do that. Lean in: this is where the HUD countdown, haptics (a slow heartbeat decaying to nothing), and silence should carry the narrative. The r0.46/r0.32 ember threads just need one design guarantee — never fully zero until the flash — and the stretch becomes the part people describe out loud.</p>
+<p>Biggest hidden adjacency: the geodesic marcher is a <i>dive platform</i>, not a Sgr A* feature. Cyg X-1 is already a landmark — a stellar-mass dive lasts milliseconds, a totally different number-story ("you'd be spaghettified before you could blink"), same shader, new marquee moment. A two-dive contrast (12.8 s vs. ~0.1 ms) is a science lesson no planetarium app on the store has. And the parked70c gold view vs. the dive's near-black fire is a genuine reveal — the palette shift itself is the drama; keep that gap wide, maybe wider.</p>
+</div></details>
+
+<details><summary>The Outsider</summary><div>
+<p>Honest first reaction: the parked shot is the one I'd screenshot and send to friends. That Saturn-looking ring of fire with "Sagittarius A*" and "26k ly from Earth" — I instantly get it, it's gorgeous, it tells me what it is.</p>
+<p>The dive frames are beautiful as abstract images — r2.34 and r0.97 especially, those molten silk streams are stunning — but here's my problem: nothing in them tells me I'm falling into anything. From r5.95 onward there are no stars, no galaxy, no universe left behind. It's orange curves on black, like macro photos of lava or a screensaver. The parked view shows me a <i>thing in space</i>; the dive shows me <i>texture</i>. Without the HUD (which I can't see in these stills, and which is apparently "quiet"), a regular person cannot distinguish "falling in" from "flying past" from "artsy transition." I need one anchor — a shrinking patch of real stars, a receding glow, anything that says "that's everything you've ever known, going away."</p>
+<p>The dark stretch is a liability, full stop. r0.46 is one dim orange smear in the corner. r0.32 is basically a black screen — on a phone, outdoors or with auto-brightness, that reads as "the app froze" or "the video is buffering." Several seconds of that and I'm tapping Skip or force-quitting. Dramatic silence works in an IMAX theater; on a 6-inch screen it looks like a bug. Keep the darkness but keep <i>something</i> alive — embers, the HUD countdown pulsing, anything with a heartbeat.</p>
+<p>And the flash at r0.17: pure white with faint scratches. Fine as a beat, but it's the climax of the whole ride and it's... a blank page.</p>
+</div></details>
+
+<details><summary>The Executor</summary><div>
+<p>Shipping verdict: the approach (r5.95 → r2.34) and horizon crossing (r0.97 → r0.88) are done — palette, shadow growth, and the fire pouring past the frame edge all read correctly and match the SVS 14585 standard. Don't touch them. The problem is r0.60 → r0.32: on my screen r0.32 is functionally a black rectangle, and that's on a calibrated display. On an OLED phone at auto-dimmed brightness with a lit room reflecting off the glass, that's 3–4 seconds of "did the app crash?" That's a liability, not drama. Dramatic black works in a theater; a phone user gets no black — they get their own face.</p>
+<p>Monday-morning fixes, all cheap at shader level:</p>
+<ol>
+<li>Floor the embers. Clamp the fire-stream luminance to ~3% until the final second, then let it die. One max() in the tonemap. The stills from r0.46 on should still show <i>something</i> at 25% screen brightness — make that a ship gate: verify on-device at low brightness, not just in the sim dump.</li>
+<li>Put the surviving sideways sky in. Hamilton says the perpendicular sky dies last — and it's your only physically-honest light source for the dark stretch. You already have the baked equirect in the lens pass; sample a thin edge annulus of faint blueshifted stars that shrinks toward the flash. That turns dead air into visible physics.</li>
+<li>Make the HUD the protagonist from r0.6: countdown-to-singularity larger, ticking. It's what holds attention through the dark.</li>
+<li>Add a CoreHaptics ramp for the interior — zero GPU cost, renderer-owned trigger, and on a phone it's the difference between "black screen" and "falling."</li>
+</ol>
+<p>Also: r0.88 and r0.74 are near-duplicates — compress that beat, spend the time at the ember stretch you just rescued.</p>
+</div></details>
+
+<h2>Peer Review Highlights</h2>
+<details><summary>What the anonymous cross-review surfaced</summary><div>
+<ul>
+<li><b>Strongest response:</b> the First Principles Thinker, 4 of 5 votes — "it names the root cause the others circle." The Contrarian took the fifth vote and was twice called the best individual catch (the invisible crossing).</li>
+<li><b>Biggest blind spot:</b> the Expansionist, unanimous — "monetizing a sequence it hasn't verified works"; the OLED romanticism "collapses the moment auto-brightness, glare, or the did-it-crash instinct appears."</li>
+<li><b>What all five advisors missed,</b> per the reviewers: the photosensitivity/accessibility ship gate on the black-to-white flash; audio as the cheapest narrative channel; discoverability of a moment gated behind free-flight to 6 rs; the need for motion evidence before shader surgery; interruption handling (calls/backgrounding) mid-sequence; VoiceOver having no representation of the 20 seconds.</li>
+</ul>
+</div></details>
+
+<footer>
+Counciled 2026-08-04 · Subject: Astrolabe's Sgr A* black-hole dive (12-frame rendered filmstrip
++ parked view, post palette-rework build <code>bad015b</code>) · Full transcript:
+<code>council-transcript-2026-08-04.md</code>
+</footer>
+</div>
+</body>
+</html>
