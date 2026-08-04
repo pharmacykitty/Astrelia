@@ -118,10 +118,33 @@
 >   that isn't there, which misled a whole tuning session. The RGB channels are the
 >   ground truth; never judge dive dumps with alpha intact.
 >
+> **Council pass 2026-08-04** (an LLM-council review of the rendered filmstrip —
+> verdict + transcript in `council-report-2026-08-04.html` / `-transcript-`): root
+> finding was that the dive had **no referent** — the bake dims deleted the stars
+> along with the glow, so "falling" read as abstract fire. Implemented (sim-verified):
+> - **The universe is back.** The bake is unsharp-split per pixel (fine mip − coarse
+>   mip): the coarse **glow** still dies with speed as before, the **point stars**
+>   are re-added after the dims — streaming past on approach, and inside surviving
+>   longest at the **frame edge** (Hamilton's sideways sky; NDC-radius weighting —
+>   `dot(screenDir, fwd)` only spans ~0.82–1 across a phone FOV and crushed
+>   everything), reddening as they die and guttering out (`life`) so the last star
+>   dies just before the flash. Compact bright bake patches (nebulae/nucleus) would
+>   survive the split as pale smears — suppressed by their bright *neighbourhood*
+>   (coarse luminance) + a per-pixel cap.
+> - **Ember floor:** where a ray carries fire, the interior never drops below ~3%
+>   luminance (true black on a phone reads as a frozen app); only the flash
+>   extinguishes it.
+> - Council items **deliberately not yet built:** a visual event marking the horizon
+>   crossing; warm-capped flash + Reduce-Motion flash mitigation (photosensitivity
+>   ship gate); CoreHaptics heartbeat + audio drone for the dark stretch;
+>   discoverability of the easter egg; interruption (call/backgrounding) handling;
+>   epilogue share card; Cyg X-1 contrast dive.
+>
 > **Not yet done:** on-device verification (trigger, perf, HUD liveness), Kerr spin /
 > frame-dragging, bake longitude-seam wrap, and the SwiftUI AttributeGraph wedge under
 > 60 Hz flight churn (pre-existing; the dive routes around it, manual free-fly on the
-> simulator still repros it).
+> simulator still repros it). Note: the `-dive` harness trigger is flaky on the sim —
+> roughly one launch in three parks at the spawn pose without falling; relaunch.
 
 This is the marquee "tap reveals real science" moment: the user free-flies to the
 real Sgr A\* marker and chooses to dive. We swap the sprite-billboard black hole

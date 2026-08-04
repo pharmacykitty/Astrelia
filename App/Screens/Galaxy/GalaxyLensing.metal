@@ -325,7 +325,30 @@ fragment float4 lens_fragment(LensVSOut in [[stage_in]],
             // (strongly-lensed sectors compress many images — blur matches that).
             float dlod = saturate(max(u.aperture * 1.4, (u.beta - 0.15) * 1.3)) * 2.2;
             float blod = saturate((1.0 - dot(outDir, dir)) * 3.0) * 2.5;
-            float4 b = skyTex.sample(wrapSmp, buv, level(clamp(dlod + blod, 0.0, 6.0)));
+            float lodF = clamp(dlod + blod, 0.0, 6.0);
+            float4 b = skyTex.sample(wrapSmp, buv, level(lodF));
+            // Council fix (2026-08-04): the dive's hard bake dim deleted the
+            // UNIVERSE along with the glow — and falling is only legible as the
+            // loss of a referent. Unsharp-split the bake: a coarse mip is the
+            // warm glow (still dies with speed, below); fine-minus-coarse is the
+            // POINT STARS, re-added after the dims so the sky stays populated —
+            // streaming past on approach, surviving longest at the frame edge
+            // inside (Hamilton's sideways sky), guttering out before the flash.
+            float diveAmt = saturate(max(u.beta * 1.8, u.aperture * 2.0));
+            float3 bStars = float3(0.0);
+            if (diveAmt > 0.001) {
+                float lodStar = clamp(max(lodF * 0.6, 1.0), 1.0, 2.5);   // soft dots, never confetti
+                float3 coarse = skyTex.sample(wrapSmp, buv, level(lodStar + 3.0)).rgb;
+                bStars = max(skyTex.sample(wrapSmp, buv, level(lodStar)).rgb - coarse, 0.0);
+                // Compact bright bake patches (nebulae, the nucleus) survive the
+                // unsharp split as big "stars" and gain into pale smears. Real
+                // point stars sit on a DARK neighbourhood (coarse ≈ 0); suppress
+                // the detail wherever the neighbourhood itself is bright, and cap
+                // the per-pixel luminance for whatever slips through.
+                bStars *= saturate(1.0 - dot(coarse, float3(0.30, 0.55, 0.15)) * 5.0);
+                float slum0 = dot(bStars, float3(0.30, 0.55, 0.15));
+                bStars *= min(1.0, 0.30 / max(slum0, 1e-4));
+            }
             // The bake resolves individual stars but under-samples the soft bulge
             // wash (its sprites shrink to true angular size); add the nucleus glow
             // procedurally — a warm band hugging the galactic plane — so strongly
@@ -358,6 +381,26 @@ fragment float4 lens_fragment(LensVSOut in [[stage_in]],
                 // left the magnified bulge glow as pale sheets — dim the whole bake
                 // hard as speed builds (parked views untouched, bknee = 0).
                 b.rgb *= 1.0 - 0.72 * bknee;
+            }
+            if (diveAmt > 0.001) {
+                // The surviving sky. Approach: stars everywhere, streaming.
+                // Interior: survival migrates to the frame edge (the sideways sky
+                // outlives fore/aft), the dots redden as they die, and the whole
+                // population gutters out across r ~0.5 → 0.2 so the LAST star
+                // dies just before the flash — its extinction is the countdown.
+                // Survival is SCREEN-space: dot(screenDir, fwd) only spans
+                // ~0.82–1.0 across a phone FOV, which crushed every star to ~0.
+                // The NDC radius is the honest "how far from the death at the
+                // centre" measure — edges keep their stars, the centre loses
+                // them first, and everything gutters out together via `life`.
+                float edge = saturate(length(ndc));
+                float inside = saturate(u.aperture * 1.35);
+                float surv = mix(1.0, clamp(edge, 0.12, 1.0), inside);
+                float life = 1.0 - smoothstep(0.60, 0.93, u.aperture);
+                float slum = dot(bStars, float3(0.30, 0.55, 0.15));
+                float3 starCol = mix(bStars, slum * float3(1.0, 0.45, 0.22), inside * 0.7);
+                b.rgb += starCol * (2.4 + 0.8 * inside) * surv * life;
+                b.a = max(b.a, saturate(slum * 1.5) * surv * life * 0.6);
             }
             b.a = max(b.a, bandProfile * 0.5);
             bg = mix(bg, b.rgb, bakeW);
@@ -404,6 +447,14 @@ fragment float4 lens_fragment(LensVSOut in [[stage_in]],
     // bh_post gets the SCREEN ray (pre-aberration): the interior's centre-vs-edge
     // weighting is compositional — post-warp directions all crowd toward fwd.
     float4 res = bh_post(col, a, screenDir, fwd, u);
+    // Ember floor (council, 2026-08-04): where the ray carries fire, the interior
+    // never drops below ~3% luminance — on a real phone true black reads as a
+    // frozen app, not drama. Only the flash extinguishes the embers.
+    if (u.aperture > 0.2) {
+        float discSig = saturate(1.0 - trans);
+        res.rgb = max(res.rgb, float3(0.034, 0.011, 0.004) * (discSig * (1.0 - u.flash)));
+        res.a = max(res.a, 0.9 * discSig);
+    }
     // Blue-noise-ish dither: the interior's long smooth ramps posterize on the
     // 8-bit reduced-res target without it.
     res.rgb += (bh_hash(in.uv * float2(u.viewW, u.viewH) + fract(u.time * 0.37) * 61.0) - 0.5)
