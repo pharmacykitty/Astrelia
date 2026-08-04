@@ -231,7 +231,14 @@ fragment float4 lens_fragment(LensVSOut in [[stage_in]],
     // lensed sky stream past the frame edges. (Compression toward the centre
     // reads as receding — that's the failed "collapse dome" — magnification
     // toward the axis is the falling-in cue.)
-    float warp = clamp(-0.6 * u.beta + 1.45 * u.aperture, -0.95, 0.9);
+    // β term kept to a TRACE (was -0.6): once real stars were restored to the
+    // dive (2026-08-04), full physical compression made them visibly drift
+    // toward the centre through the approach — the receding cue again, and the
+    // whole fall read as flying AWAY. The into-cues that must win are geometric:
+    // the shadow looming as r drops and the lensing pushing stars outward into
+    // the Einstein ring — both already in the render, both fighting the old
+    // compression.
+    float warp = clamp(-0.15 * u.beta + 1.45 * u.aperture, -0.95, 0.9);
     if (fabs(warp) > 0.001) dir = bh_aberrate(dir, fwd, warp);
 
     float dAlong = dot(hp, dir);
