@@ -1,5 +1,7 @@
 import SwiftUI
 import simd
+import CoreHaptics
+import QuartzCore
 
 // The black-hole dive easter egg (design of record: docs/black-hole-dive.md).
 //
@@ -88,7 +90,16 @@ enum DivePhysics {
         s.aperture = Float(0.97 * pow(inside, 1.15))
         s.redshift = Float(pow(inside, 1.5))
         s.spaghetti = Float(clamp01((inside - 0.35) / 0.5)) * motion
-        s.flash = Float(clamp01((Double(endRadiusRs) + 0.09 - r) / 0.09))
+        // The final white-out arrives warm and, under Reduce Motion, attenuated —
+        // a full-frame white snap out of near-black is a photosensitivity risk.
+        s.flash = Float(clamp01((Double(endRadiusRs) + 0.09 - r) / 0.09)) * (reduceMotion ? 0.45 : 1)
+        // The horizon crossing gets a VISIBLE event (council: the headline beat
+        // can't live only in a HUD caption): a photon-ring flare that snaps in
+        // just before r = 1 and decays over the first ~1.5 s inside. Asymmetric
+        // widths — the fall is fast outside (lead-in stays snappy) and the
+        // narrative rate is slow inside (the afterglow lingers).
+        let cw = r >= 1 ? 0.30 : 0.10
+        s.crossing = Float(exp(-pow((r - 1) / cw, 2))) * (reduceMotion ? 0.6 : 1)
         return s
     }
 
@@ -110,14 +121,53 @@ enum DivePhysics {
                                        : "At the event horizon",
                                String(format: "Time runs %.1f× slower for you", gamma)])
         } else if r > Double(endRadiusRs) + 0.02 {
-            let remaining = (r - Double(endRadiusRs)) / Double(interiorRateRsPerS)
+            // The countdown itself is rendered big by DiveHUD (the protagonist
+            // of the dark stretch) — these are the quiet supporting lines.
             return HUD(headline: "Inside the event horizon",
                        lines: ["Every path now leads inward",
-                               String(format: "Singularity in %.1f s", remaining),
                                "Tidal gravity is stretching you"])
         } else {
             return HUD(headline: " ", lines: [])
         }
+    }
+}
+
+/// The interior heartbeat (council: carry the dark stretch on non-visual
+/// channels). Renderer-owned like everything in the dive — transient beats
+/// scheduled from the display-link frame, no SwiftUI dependency. The beat
+/// slows as time dilation deepens and fades out by r ≈ 0.3: the last
+/// heartbeat dies with the last light, and the flash arrives in silence.
+@MainActor
+final class DiveHaptics {
+    private var engine: CHHapticEngine?
+    private var nextBeat: TimeInterval = 0
+
+    init() {
+        guard CHHapticEngine.capabilitiesForHardware().supportsHaptics else { return }
+        engine = try? CHHapticEngine()
+        try? engine?.start()
+    }
+
+    /// One soft thump per beat, from just outside the horizon down to r ≈ 0.3.
+    func update(rRs r: Double) {
+        guard let engine, r < 1.05, r > 0.3 else { return }
+        let now = CACurrentMediaTime()
+        guard now >= nextBeat else { return }
+        let depth = min(1, max(0, (1.05 - r) / 0.75))     // 0 at crossing → 1 near the end
+        nextBeat = now + 0.75 + 0.85 * depth              // the heartbeat slows (dilation)
+        let event = CHHapticEvent(eventType: .hapticTransient, parameters: [
+            .init(parameterID: .hapticIntensity, value: Float(0.9 * (1.0 - depth * 0.85))),
+            .init(parameterID: .hapticSharpness, value: 0.25),
+        ], relativeTime: 0)
+        if let pattern = try? CHHapticPattern(events: [event], parameters: []),
+           let player = try? engine.makePlayer(with: pattern) {
+            try? player.start(atTime: 0)
+        }
+    }
+
+    func stop() {
+        engine?.stop()
+        engine = nil
     }
 }
 
@@ -129,8 +179,24 @@ struct DiveHUD: View {
 
     var body: some View {
         let hud = DivePhysics.hud(atRs: rRs)
+        let inside = rRs < 1 && rRs > Double(DivePhysics.endRadiusRs) + 0.02
         VStack(spacing: 10) {
             Spacer()
+            if inside {
+                // Council: from here the countdown is the protagonist — the one
+                // thing that holds attention while the light dies.
+                let remaining = (rRs - Double(DivePhysics.endRadiusRs)) / Double(DivePhysics.interiorRateRsPerS)
+                VStack(spacing: 2) {
+                    Text(String(format: "%.1f", max(0, remaining)))
+                        .font(.system(size: 46, weight: .light, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(.white.opacity(0.9))
+                        .contentTransition(.numericText(countsDown: true))
+                    Text("seconds to the singularity")
+                        .font(.system(.caption, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.6))
+                }
+            }
             if !hud.lines.isEmpty {
                 VStack(spacing: 5) {
                     Text(hud.headline)

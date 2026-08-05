@@ -134,11 +134,20 @@
 > - **Ember floor:** where a ray carries fire, the interior never drops below ~3%
 >   luminance (true black on a phone reads as a frozen app); only the flash
 >   extinguishes it.
-> - Council items **deliberately not yet built:** a visual event marking the horizon
->   crossing; warm-capped flash + Reduce-Motion flash mitigation (photosensitivity
->   ship gate); CoreHaptics heartbeat + audio drone for the dark stretch;
->   discoverability of the easter egg; interruption (call/backgrounding) handling;
->   epilogue share card; Cyg X-1 contrast dive.
+> - **Council must-fix list completed (same day):** (1) the **horizon crossing has a
+>   visible event** — a `crossing` uniform (staged in `DivePhysics.stage`, snappy
+>   lead-in / ~1.5 s afterglow) drives a white-hot photon-ring flare at b ≈ 2.6 rs
+>   in the lens pass; (2) the **flash is warm-capped** (1.22, 1.02, 0.80 — full-frame
+>   pure white out of near-black is a photosensitivity risk) and attenuated ×0.45
+>   under Reduce Motion, which also softens the crossing pulse; (3) the dark stretch
+>   is carried by **`DiveHaptics`** (renderer-owned CoreHaptics heartbeat from the
+>   display link — slows with dilation, silent by r ≈ 0.3 so the flash arrives in
+>   stillness; skipped under Reduce Motion / no-haptics hardware) and the **HUD
+>   countdown becomes the protagonist** inside the horizon (large numeric
+>   "seconds to the singularity" in `DiveHUD`).
+> - Council items **deliberately not yet built:** discoverability of the easter egg;
+>   interruption (call/backgrounding) handling; epilogue share card; Cyg X-1
+>   contrast dive; audio drone (haptics shipped first — sound needs a design pass).
 >
 > **Not yet done:** on-device verification (trigger, perf, HUD liveness), Kerr spin /
 > frame-dragging, bake longitude-seam wrap, and the SwiftUI AttributeGraph wedge under

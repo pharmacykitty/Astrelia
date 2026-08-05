@@ -27,7 +27,7 @@ struct LensUniforms {
     float dnx, dny, dnz, diskInner;               // disc normal + inner radius (pc)
     float diskOuter, beta, bakeMix, aperture;     // disc outer (pc); infall v/c; equirect blend; universe-collapse
     float spaghetti, redshiftG, flash, discBoost; // tidal stretch; global redshift; final flash; disc flare
-    float viewW, viewH, pad0, pad1;
+    float viewW, viewH, crossing, pad1;           // + horizon-crossing ring-flare pulse
 };
 
 struct LensVSOut {
@@ -190,7 +190,10 @@ static float4 bh_post(float3 col, float a, float3 screenDir, float3 fwd, constan
         col = mix(col, col * float3(0.88, 0.96, 1.14), u.redshiftG * (1.0 - axial) * 0.5);
     }
     if (u.flash > 0.001) {                                 // the final white-out
-        col = mix(col, float3(1.35), u.flash);
+        // Warm-capped: full-frame pure white out of near-black physically hurts
+        // on OLED (and is the photosensitivity concern) — the first light after
+        // the last light reads warm.
+        col = mix(col, float3(1.22, 1.02, 0.80), u.flash);
         a = max(a, u.flash);
     }
     return float4(col, a);
@@ -461,6 +464,15 @@ fragment float4 lens_fragment(LensVSOut in [[stage_in]],
         float discSig = saturate(1.0 - trans);
         res.rgb = max(res.rgb, float3(0.034, 0.011, 0.004) * (discSig * (1.0 - u.flash)));
         res.a = max(res.a, 0.9 * discSig);
+    }
+    // Horizon-crossing event: the photon ring (impact parameter b ≈ 2.6 rs)
+    // flares white-hot as you pass r = 1 and its afterglow decays inside — the
+    // headline beat gets an image, not just a HUD caption.
+    if (u.crossing > 0.001 && dAlong > 0.0) {
+        float ringNess = exp(-pow((perp / u.rs - 2.6) / 0.38, 2.0));
+        res.rgb += float3(1.30, 1.15, 0.95) * (ringNess * u.crossing * 0.7);
+        res.rgb *= 1.0 + 0.15 * u.crossing;
+        res.a = max(res.a, saturate(ringNess * u.crossing));
     }
     // Blue-noise-ish dither: the interior's long smooth ramps posterize on the
     // 8-bit reduced-res target without it.

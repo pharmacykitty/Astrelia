@@ -61,6 +61,7 @@ struct DiveStage: Equatable {
     var redshift: Float = 0    // global red/dim death of the light
     var flash: Float = 0       // final white-out
     var discBoost: Float = 0   // disc flare during the plunge
+    var crossing: Float = 0    // horizon-crossing pulse (photon-ring flare)
 }
 
 /// Per-frame camera state handed to the renderer. `viewProj` is built camera-relative
@@ -110,7 +111,7 @@ private struct LensUniforms {
     var dnx: Float, dny: Float, dnz: Float, diskInner: Float
     var diskOuter: Float, beta: Float, bakeMix: Float, aperture: Float
     var spaghetti: Float, redshiftG: Float, flash: Float, discBoost: Float
-    var viewW: Float, viewH: Float, pad0: Float, pad1: Float
+    var viewW: Float, viewH: Float, crossing: Float, pad1: Float
 }
 
 /// Matches `BakeUniforms` in GalaxyLensing.metal (8 scalars, 32 bytes).
@@ -403,9 +404,13 @@ final class GalaxyMetalRenderer: NSObject {
     private var diveTilt = SIMD3<Float>(0, 0, 0)          // composition: hole off-axis, disc in frame
     private(set) var diveNarrativeR: Float = .infinity   // rs units
 
+    private var diveHaptics: DiveHaptics?
+
     private func applyDiveCamera(dt: Float) {
         guard camera.holeRs > 0, let ch = diveChannel, ch.start != nil else {
             diveActive = false
+            diveHaptics?.stop()
+            diveHaptics = nil
             return
         }
         let rs = camera.holeRs
@@ -413,6 +418,7 @@ final class GalaxyMetalRenderer: NSObject {
             // Seamless handoff: continue from exactly where free flight was, the
             // way it was moving — no repositioning, no aim cut.
             diveActive = true
+            diveHaptics = ch.reduceMotion ? nil : DiveHaptics()
             divePos = ch.entryEye
             diveVel = ch.entryVelocity
             let maxEntry = DivePhysics.maxEntrySpeedRsPerS * rs
@@ -457,6 +463,7 @@ final class GalaxyMetalRenderer: NSObject {
             diveVel = inward * (0.05 * rs)   // a crawl, so the view stays gently alive
         }
         ch.currentRRs = Double(diveNarrativeR)
+        diveHaptics?.update(rRs: Double(diveNarrativeR))
         if diveNarrativeR <= DivePhysics.endRadiusRs + 0.001 { ch.finished = true }
 
         // Infall has angular momentum: the render pose spirals around the hole
@@ -553,7 +560,7 @@ final class GalaxyMetalRenderer: NSObject {
                             spaghetti: c.dive.spaghetti, redshiftG: c.dive.redshift,
                             flash: c.dive.flash, discBoost: c.dive.discBoost,
                             viewW: Float(c.viewSize.width), viewH: Float(c.viewSize.height),
-                            pad0: 0, pad1: 0)
+                            crossing: c.dive.crossing, pad1: 0)
     }
 
     /// Renders the additive scene into the equirect panorama, as seen from the hole.
