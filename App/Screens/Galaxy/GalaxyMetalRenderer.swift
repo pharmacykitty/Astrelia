@@ -583,9 +583,13 @@ final class GalaxyMetalRenderer: NSObject {
     private func bakeSkyIfNeeded(_ cb: MTLCommandBuffer) {
         guard camera.holeRs > 0, let device, let bakePipeline else { return }
         let holeDist = max(simd_distance(camera.eye, camera.holePos), camera.holeRs)
-        let moved = bakedEye.x.isNaN || simd_distance(bakedEye, camera.eye) > 0.05 * holeDist
+        // 12% + 0.5 s: at 5%/0.2 s an orbiting camera re-baked the whole sprite
+        // scene (plus mips) up to 5×/s and frame rate tanked. The panorama only
+        // drifts with POSITION (rotation is free in an equirect), and a 12%
+        // parallax error at the lens region's edge is invisible.
+        let moved = bakedEye.x.isNaN || simd_distance(bakedEye, camera.eye) > 0.12 * holeDist
         let now = CACurrentMediaTime()
-        guard bakedVersion != loadedVersion || (moved && now - lastBakeTime > 0.2) else { return }
+        guard bakedVersion != loadedVersion || (moved && now - lastBakeTime > 0.5) else { return }
         if skyBake == nil {
             // Mipmapped: the lens pass samples this with auto-derivative mip
             // filtering — without mips the panorama's star sprites alias into

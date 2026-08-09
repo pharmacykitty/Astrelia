@@ -144,8 +144,14 @@ static float4 bh_disc(float3 xp, float3 n, float rd, float rIn, float rOut,
     // Optically THICK (NASA's disc shows a single surface, not stacked layers):
     // high alpha kills the transmittance after the first crossing or two, so the
     // fire keeps its swirl texture instead of layering into white.
-    float alpha = saturate((0.10 + 0.90 * smoothstep(0.40, 1.15, texture)) * (1.0 - t * 0.92) * 1.4);
-    return float4(rgb, alpha);
+    // The outer disc DISSOLVES: without this fade the dim outer expanse ended at
+    // a hard rOut cutoff — a bounded, band-noise-textured slab whose elliptical
+    // outline (and its lensed far-side domes) read as dark "bubbles" flanking
+    // the shadow. Fire must thin into streams and then into nothing.
+    float outerFade = 1.0 - smoothstep(0.45, 0.92, t);
+    float alpha = saturate((0.10 + 0.90 * smoothstep(0.40, 1.15, texture)) * (1.0 - t * 0.92) * 1.4)
+                * outerFade;
+    return float4(rgb * outerFade, alpha);
 }
 
 // NASA-fire tonemap for the disc's accumulated HDR light (SVS 14585): brightness
@@ -320,8 +326,13 @@ fragment float4 lens_fragment(LensVSOut in [[stage_in]],
         // Only rays the hole actually BENT may fall back to the baked panorama —
         // an unbent edge pixel must keep its own screen sample, or the bake's warm
         // wash paints a border around the whole frame wherever the lens is active.
-        float bent = saturate((1.0 - dot(outDir, dir)) * 400.0);
-        float bakeW = max((1.0 - screenW) * bent, u.bakeMix);
+        // STRONGLY-bent rays must use the bake even when their deflected point is
+        // still on screen: the screen sample re-images whatever sits beside the
+        // hole (the nuclear swarm), double-imaging it into the flanking "bubbles"
+        // — the bake is where near-hole content is culled, so only it can show
+        // the clean distant sky the lens should bend.
+        float bent = saturate(bendRaw * 400.0);
+        float bakeW = max(max((1.0 - screenW) * bent, saturate(bendRaw * 25.0)), u.bakeMix);
         if (bakeW > 0.001) {
             // Wrap longitude so rays crossing the panorama's ±π seam stay continuous.
             // Mip-filtered: auto derivatives pick the right level whether the warp
@@ -354,12 +365,16 @@ fragment float4 lens_fragment(LensVSOut in [[stage_in]],
             {
                 float3 axisB = normalize(hp);
                 float deltaB = min(0.05, bendRaw * 0.55);
-                b = float4(0.0);
-                for (int k = -2; k <= 2; k++) {
-                    float3 dB = normalize(outDir + cross(axisB, outDir) * (deltaB * float(k)));
-                    b += skyTex.sample(wrapSmp, bh_equirect(dB), level(lodF));
+                if (deltaB > 0.002) {                      // sheared arcs near the ring only
+                    b = float4(0.0);
+                    for (int k = -2; k <= 2; k++) {
+                        float3 dB = normalize(outDir + cross(axisB, outDir) * (deltaB * float(k)));
+                        b += skyTex.sample(wrapSmp, bh_equirect(dB), level(lodF));
+                    }
+                    b *= 1.0 / 5.0;
+                } else {                                   // weak bend: one tap is identical
+                    b = skyTex.sample(wrapSmp, buv, level(lodF));
                 }
-                b *= 1.0 / 5.0;
             }
             // Council fix (2026-08-04): the dive's hard bake dim deleted the
             // UNIVERSE along with the glow — and falling is only legible as the
@@ -383,12 +398,18 @@ fragment float4 lens_fragment(LensVSOut in [[stage_in]],
                 // signature strong-lensing cue.
                 float3 axisH = normalize(hp);
                 float delta = min(0.035, bendRaw * 0.35);
-                float3 acc3 = float3(0.0);
-                for (int k = -1; k <= 1; k++) {
-                    float3 d2 = normalize(outDir + cross(axisH, outDir) * (delta * float(k)));
-                    acc3 += skyTex.sample(wrapSmp, bh_equirect(d2), level(lodStar)).rgb;
+                float3 acc3;
+                if (delta > 0.002) {
+                    acc3 = float3(0.0);
+                    for (int k = -1; k <= 1; k++) {
+                        float3 d2 = normalize(outDir + cross(axisH, outDir) * (delta * float(k)));
+                        acc3 += skyTex.sample(wrapSmp, bh_equirect(d2), level(lodStar)).rgb;
+                    }
+                    acc3 *= 1.0 / 3.0;
+                } else {
+                    acc3 = skyTex.sample(wrapSmp, buv, level(lodStar)).rgb;
                 }
-                bStars = max(acc3 * (1.0 / 3.0) - coarse, 0.0);
+                bStars = max(acc3 - coarse, 0.0);
                 // Compact bright bake patches (nebulae, the nucleus) survive the
                 // unsharp split as big "stars" and gain into pale smears. Real
                 // point stars sit on a DARK neighbourhood (coarse ≈ 0); suppress
@@ -610,14 +631,14 @@ vertex BakeVSOut bake_vertex(uint vid [[vertex_id]],
     float3 rel = float3(s.px, s.py, s.pz) - float3(u.ox, u.oy, u.oz);
     float dist = length(rel);
     float holeDist = length(float3(s.px, s.py, s.pz) - float3(u.hx, u.hy, u.hz));
-    // Cull: sprites hugging the camera; the hole's own beacon; and the SMOOTH
-    // radiant-core glow near the hole (soft, world-sized). Lensed, an extended
-    // bright glow behind the hole double-images into big round lobes — the
-    // "two bubbles" — physically honest but unreadable. The lensed sky keeps
-    // its stars and grain (structure reads as bending); the direct view keeps
-    // the full glow.
-    bool softCore = holeDist < u.coreSkip && s.softness > 0.45 && s.mode < 0.5;
-    if (dist < u.skipRadius || holeDist < u.holeSkip || softCore) {
+    // Cull: sprites hugging the camera, and EVERYTHING near the hole (beacon,
+    // core glow, the nuclear star swarm — u.coreSkip). Any compact content
+    // sitting behind the hole double-images into two lobes flanking the shadow
+    // — "the two bubbles" — whether it's smooth glow or crisp grain. The lensed
+    // sky shows only the DISTANT background (stars, arms, dust ribbon), which
+    // bends into clean arcs; the direct un-lensed view keeps all the local
+    // content.
+    if (dist < u.skipRadius || holeDist < u.coreSkip) {
         out.position = float4(2.0, 2.0, 2.0, 1.0);
         return out;
     }
