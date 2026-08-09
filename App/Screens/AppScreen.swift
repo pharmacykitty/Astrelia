@@ -4,7 +4,7 @@ import SwiftUI
 /// menu was replaced by the in-sky destination dock on 2026-07-28 — the sky is the
 /// app; everything else is an overlay on it.)
 enum AppScreen: Hashable, CaseIterable, Identifiable {
-    case tonight, catalog, constellations, galaxyMap, about
+    case tonight, catalog, constellations, galaxyMap, settings, about
 
     var id: Self { self }
 
@@ -14,6 +14,7 @@ enum AppScreen: Hashable, CaseIterable, Identifiable {
         case .catalog: "Catalog"
         case .constellations: "Figures"
         case .galaxyMap: "Galaxy"
+        case .settings: "Settings"
         case .about: "About"
         }
     }
@@ -24,6 +25,7 @@ enum AppScreen: Hashable, CaseIterable, Identifiable {
         case .catalog: "Search stars, planets & deep-sky objects"
         case .constellations: "The 88, plus asterisms, lost & cultural figures"
         case .galaxyMap: "Fly through the galaxy in 3D"
+        case .settings: "Units, sky defaults & home location"
         case .about: "Data sources, credits & licenses"
         }
     }
@@ -34,6 +36,7 @@ enum AppScreen: Hashable, CaseIterable, Identifiable {
         case .catalog: "binoculars.fill"
         case .constellations: "point.3.connected.trianglepath.dotted"
         case .galaxyMap: "globe.americas.fill"
+        case .settings: "gearshape.fill"
         case .about: "info.circle.fill"
         }
     }
@@ -44,6 +47,7 @@ enum AppScreen: Hashable, CaseIterable, Identifiable {
         case .catalog: .cyan
         case .constellations: Theme.accent
         case .galaxyMap: .purple
+        case .settings: .mint
         case .about: .gray
         }
     }

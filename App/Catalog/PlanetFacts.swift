@@ -11,6 +11,7 @@ enum PlanetFacts {
     private static let jupiterRadiusEarth = 11.21
     private static let jupiterMassEarth = 317.8
 
+    @MainActor
     static func relatableFacts(for planet: Exoplanet, in system: PlanetarySystem,
                                now: Date = Date()) -> [String] {
         var facts: [String] = []
@@ -46,10 +47,13 @@ enum PlanetFacts {
     }
 
     /// "Estimated temperature ≈ 15°C — about as mild as Earth." / "…hot enough to melt lead."
+    /// MainActor: the displayed unit follows Settings; the "feel" flavour keys
+    /// off °C internally regardless of display unit.
+    @MainActor
     static func temperatureSentence(_ planet: Exoplanet) -> String? {
         guard let k = planet.equilibriumTempK, k > 0 else { return nil }
         let c = Astrophysics.celsius(fromKelvin: k)
-        let base = "Estimated temperature ≈ \(Int(c.rounded()))°C"
+        let base = "Estimated temperature ≈ \(AppPreferences.shared.temperatureUnit.format(kelvin: k))"
         let flavour: String
         switch c {
         case 600...: flavour = " — hot enough to melt lead."

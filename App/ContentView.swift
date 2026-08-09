@@ -18,7 +18,7 @@ struct ContentView: View {
     @State private var store = StarCatalogStore()
     @State private var exoStore = ExoplanetStore()
     @State private var arController = ARCameraController()
-    @State private var filters = SkyFilters()
+    @State private var filters = AppPreferences.shared.skyFilters   // persisted; written back onChange
     @State private var showFilters = false
     // The destination dock (replaces the old full-screen menu): list screens
     // present as sheets over the live sky; the Galaxy Map is the one full-screen
@@ -34,7 +34,7 @@ struct ContentView: View {
     @State private var uiRotation = 0.0   // chrome rotation (degrees) to stay upright as the phone tilts
     @Environment(\.openURL) private var openURL
 
-    @State private var mode: SkyMode = .virtual
+    @State private var mode: SkyMode = AppPreferences.shared.skyModeAR ? .ar : .virtual
     @State private var starField: [StarPoint] = []          // sorted brightest-first
     @State private var constellationPaths: [ConstellationPath] = []
     // Ecliptic overlay: the ecliptic sampled as world directions and the live
@@ -42,8 +42,8 @@ struct ContentView: View {
     @State private var eclipticPoints: [SIMD3<Double>] = []
     @State private var planetGlyphs: [SkyGlyph] = []
 
-    @State private var fieldOfView = 65.0
-    @State private var zoomAnchor = 65.0
+    @State private var fieldOfView = AppPreferences.shared.fieldOfView
+    @State private var zoomAnchor = AppPreferences.shared.fieldOfView
     @State private var selection: StarSelection?
 
     // Time scrubber: an offset (seconds) from "now" applied to every position
@@ -139,6 +139,7 @@ struct ContentView: View {
         }
         .onDisappear { provider.stop(); arController.stop() }
         .onChange(of: mode) { _, newMode in
+            AppPreferences.shared.skyModeAR = newMode == .ar
             if newMode == .ar {
                 // A fresh AR session has an arbitrary heading; re-seed from compass.
                 arController.start()
@@ -148,7 +149,18 @@ struct ContentView: View {
                 arController.stop()
             }
         }
-        .onChange(of: filters) { _, _ in refreshSky() }
+        .onChange(of: filters) { _, new in
+            refreshSky()
+            AppPreferences.shared.skyFilters = new
+        }
+        // Settings can edit the persisted filters (e.g. default magnitude) while
+        // this view holds its own copy — re-seed when a sheet closes. Equatable
+        // guard prevents write-back ping-pong.
+        .onChange(of: shownSheet) { _, new in
+            if new == nil, AppPreferences.shared.skyFilters != filters {
+                filters = AppPreferences.shared.skyFilters
+            }
+        }
         .task {
             while !Task.isCancelled {
                 updateInterfaceRotation()      // responsive: chrome must track tilt promptly
@@ -206,6 +218,7 @@ struct ContentView: View {
         case .catalog: CatalogView(store: store, exo: exoStore)
         case .constellations: ConstellationsView(store: store)
         case .galaxyMap: EmptyView()   // presented as a full-screen cover instead
+        case .settings: SettingsView()
         case .about: AboutView()
         }
     }
@@ -712,7 +725,10 @@ struct ContentView: View {
                 if mode == .virtual { fieldOfView = min(95, max(18, zoomAnchor / value.magnification)) }
                 lastZoomInteraction = Date()   // the dock recedes while you gaze
             }
-            .onEnded { _ in zoomAnchor = fieldOfView }
+            .onEnded { _ in
+                zoomAnchor = fieldOfView
+                AppPreferences.shared.fieldOfView = fieldOfView
+            }
     }
 
     private func tapGesture(size: CGSize) -> some Gesture {

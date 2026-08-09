@@ -32,6 +32,8 @@ struct AstrolabeApp: App {
             } else if ProcessInfo.processInfo.arguments.contains("-snapshotAbout") {
                 NavigationStack { AboutView() }
                     .preferredColorScheme(.dark)
+            } else if ProcessInfo.processInfo.arguments.contains("-snapshotSettings") {
+                SettingsView()
             } else if ProcessInfo.processInfo.arguments.contains("-snapshotTonight") {
                 NavigationStack {
                     TonightView(fixedLocation: GeographicLocation(latitude: .degrees(40.71),

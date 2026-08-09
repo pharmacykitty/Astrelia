@@ -114,12 +114,16 @@ The trick is separating **real data** from **art**:
 ## Planned improvements (spec'd from the 2026-06-28 full-app review)
 A whole-codebase review produced concrete specs for the cross-cutting gaps. **These specs are
 the source of truth for that work — read them before implementing, and keep them in sync.**
-- **User preferences & Settings** → **`docs/preferences-spec.md`** *(approved to build first).*
-  The app currently persists **no** scalar preferences (no `UserDefaults`/`AppStorage` anywhere):
-  Sky filters/mode/FOV, Galaxy toggles, units, and a home-location fallback all reset each launch.
-  Spec proposes one injected `@Observable` `AppPreferences` (+ an App Group for widgets) and a
-  Settings screen in `MoreMenu`. (The spec predates the Ecliptica split — ignore its astrology
-  preferences; those belong to that app now.)
+- **User preferences & Settings ✅ (v1 built 2026-08-09)** → **`docs/preferences-spec.md`**.
+  `App/Preferences/AppPreferences.swift` (`@MainActor @Observable`, write-through to
+  `UserDefaults`, namespaced `pref.*` keys, schema-versioned, `reset()`) + `Units.swift`
+  (temperature/distance/star-distance display units) + `App/Screens/SettingsView.swift`
+  (a `settings` case in the destination dock). Persisted: Sky mode/FOV/all 8 filters,
+  Galaxy Milky-Way/hosts toggles, units (routed through `StarFacts`/`PlanetFacts`/galaxy
+  + catalog distance rows), home observing location (Tonight falls back to it when live
+  location is unavailable), Reduce-Motion respect (storage for the a11y spec). Astrology
+  prefs from the spec moved to Ecliptica. Deferred: unit-test target, iCloud sync,
+  App Group (needed before widgets).
 - **Accessibility** → **`docs/accessibility-spec.md`** *(deferred).* No Dynamic Type, no VoiceOver
   representation of the Canvas/Metal surfaces (wheel/sphere/galaxy/sky), Reduce Motion honored in
   only one file.

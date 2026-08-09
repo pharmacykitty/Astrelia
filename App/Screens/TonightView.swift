@@ -72,10 +72,10 @@ struct TonightView: View {
 
     @ViewBuilder
     private var loadingOrPermission: some View {
-        if observer.denied && fixedLocation == nil {
+        if observer.denied && fixedLocation == nil && homeLocation == nil {
             ContentUnavailableView("Location needed",
                                    systemImage: "location.slash",
-                                   description: Text("Tonight's sky depends on where you are. Enable location for Astrolabe in Settings."))
+                                   description: Text("Tonight's sky depends on where you are. Enable location for Astrolabe in Settings — or save a home location in the app's Settings."))
                 .foregroundStyle(.white)
         } else {
             HStack { Spacer(); ProgressView().tint(.white); Spacer() }.padding(.top, 40)
@@ -268,13 +268,21 @@ struct TonightView: View {
 
     /// A stable identity for the observer's coordinate, driving `.task(id:)`.
     private var locationKey: String? {
-        (fixedLocation ?? observer.location).map {
+        (fixedLocation ?? observer.location ?? homeLocation).map {
             "\($0.latitude.degrees),\($0.longitude.degrees)"
         }
     }
 
+    /// Settings' saved home observing spot — the fallback when live location
+    /// is denied or hasn't arrived yet (docs/preferences-spec.md).
+    private var homeLocation: GeographicLocation? {
+        let p = AppPreferences.shared
+        guard p.useHomeFallback, let lat = p.homeLatitude, let lon = p.homeLongitude else { return nil }
+        return GeographicLocation(latitude: .degrees(lat), longitude: .degrees(lon))
+    }
+
     private func recompute() async {
-        guard let loc = fixedLocation ?? observer.location else { return }
+        guard let loc = fixedLocation ?? observer.location ?? homeLocation else { return }
         let date = Date()
         // Rise/set scanning is heavy (ephemeris over 24h); keep it off the main actor.
         let result = await Task.detached(priority: .userInitiated) {

@@ -92,6 +92,7 @@ enum StarFacts {
     /// intuition — how long its light has travelled, how it compares to the Sun in
     /// brightness, heat, and size. Only the comparisons we can actually derive from
     /// this star's data are returned, so callers can show whatever they get.
+    @MainActor
     static func relatableFacts(for star: Star, now: Date = Date()) -> [String] {
         var facts: [String] = []
         if let pc = star.distanceParsecs, pc > 0 { facts.append(lightTravelSentence(distanceParsecs: pc, now: now)) }
@@ -133,9 +134,11 @@ enum StarFacts {
     }
 
     /// "Its surface is ~3× hotter than the Sun's (≈17,000 K)." / "...cooler..."
+    /// MainActor: the displayed unit follows Settings (docs/preferences-spec.md).
+    @MainActor
     static func temperatureSentence(_ kelvin: Double) -> String {
         let ratio = kelvin / Astrophysics.solarEffectiveTemperatureK
-        let t = "≈ \(compact(kelvin)) K"
+        let t = "≈ \(AppPreferences.shared.temperatureUnit.format(kelvin: kelvin))"
         if ratio >= 1.15 {
             return "Its surface runs about \(compact(ratio))× hotter than the Sun's (\(t))."
         } else if ratio <= 0.85 {

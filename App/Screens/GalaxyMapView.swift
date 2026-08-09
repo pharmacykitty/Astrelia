@@ -22,8 +22,8 @@ struct GalaxyMapView: View {
 
     @State private var focusApplied = false
     @State private var shownSystem: PlanetarySystem?
-    @State private var showMilkyWay = true          // toggle the stylized backdrop off to see only real objects
-    @State private var hostsOnly = false            // show only stars with known planets (+ Sun & landmarks)
+    @State private var showMilkyWay = AppPreferences.shared.galaxyMilkyWay   // persisted
+    @State private var hostsOnly = AppPreferences.shared.galaxyHostsOnly     // persisted
     @State private var showOptions = false          // the drop-down view-options panel
     @State private var showCatalog = false
     @State private var stars: [GalaxyStar] = []
@@ -287,10 +287,10 @@ struct GalaxyMapView: View {
         let teal = Color(red: 0.4, green: 0.95, blue: 0.9)
         return VStack(spacing: 2) {
             optionRow("Milky Way", "sparkles", tint: .purple, toggle: true, isOn: showMilkyWay) {
-                showMilkyWay.toggle(); buildScene()
+                showMilkyWay.toggle(); AppPreferences.shared.galaxyMilkyWay = showMilkyWay; buildScene()
             }
             optionRow("Planet hosts only", "globe.americas.fill", tint: teal, toggle: true, isOn: hostsOnly) {
-                hostsOnly.toggle(); buildScene()
+                hostsOnly.toggle(); AppPreferences.shared.galaxyHostsOnly = hostsOnly; buildScene()
             }
             Divider().overlay(.white.opacity(0.12)).padding(.vertical, 2)
             optionRow("Centre on the Sun", "sun.max.fill", tint: Theme.accent, toggle: false, isOn: false) {
@@ -354,7 +354,10 @@ struct GalaxyMapView: View {
 
     private func starDetail(_ star: GalaxyStar) -> String {
         let ly = star.distanceParsecs * 3.2616
-        var s = String(format: "%.1f ly · %.1f pc · mag %@", ly, star.distanceParsecs, StarFacts.mag(star.magnitude))
+        let dist = AppPreferences.shared.largeDistanceUnit == .parsecs
+            ? String(format: "%.1f pc · %.1f ly", star.distanceParsecs, ly)
+            : String(format: "%.1f ly · %.1f pc", ly, star.distanceParsecs)
+        var s = "\(dist) · mag \(StarFacts.mag(star.magnitude))"
         if let c = star.constellation { s += " · \(c)" }
         return s
     }
@@ -1638,7 +1641,8 @@ private struct DistanceReadout: View {
         let pc = Double(parsecs)
         if pc < 0.05 { return "At Earth" }
         let ly = pc * Astrophysics.lightYearsPerParsec
-        return "\(format(ly)) ly from Earth"
+        let unit = AppPreferences.shared.largeDistanceUnit
+        return "\(format(unit == .parsecs ? pc : ly)) \(unit.label) from Earth"
     }
 
     private func format(_ ly: Double) -> String {

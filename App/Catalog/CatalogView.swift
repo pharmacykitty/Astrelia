@@ -346,7 +346,9 @@ private struct StarDetailView: View {
                                   StarFacts.constellationName(star.constellation)]
                         .compactMap { $0 }.joined(separator: " · ")) {
             if let pc = star.distanceParsecs {
-                DetailRow("Distance", String(format: "%.1f ly · %.1f pc", pc * 3.2616, pc))
+                DetailRow("Distance", AppPreferences.shared.largeDistanceUnit == .parsecs
+                    ? String(format: "%.1f pc · %.1f ly", pc, pc * 3.2616)
+                    : String(format: "%.1f ly · %.1f pc", pc * 3.2616, pc))
             }
             DetailRow("Apparent magnitude", String(format: "%.2f", star.apparentMagnitude))
             if let abs = star.absoluteMagnitude { DetailRow("Absolute magnitude", String(format: "%.2f", abs)) }

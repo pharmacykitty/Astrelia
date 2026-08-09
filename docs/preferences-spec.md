@@ -1,6 +1,11 @@
 # User Preferences & Settings — Spec
 
-> Status: **planned, approved for build.** Drafted 2026-06-28 from the full-app review.
+> Status: **v1 built (2026-08-09).** `AppPreferences` + `Units` + Settings screen
+> (dock gear) shipped; Sky mode/FOV/filters, Galaxy toggles, units, and the home
+> observing location all persist. Astrology/chart/transit prefs from the table below
+> moved to the Ecliptica app with the 2026-07-15 split and were dropped here.
+> Deferred: unit-test target (the app has none yet — backlog), iCloud sync.
+> Drafted 2026-06-28 from the full-app review.
 > Goal: persist user choices across launches, and add a single app-level **Settings**
 > screen. Today the app stores **zero** scalar preferences (a clean sweep finds no
 > `UserDefaults`/`AppStorage` anywhere) — every toggle resets on each cold start.
