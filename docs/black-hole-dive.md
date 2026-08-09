@@ -158,19 +158,26 @@
 >   interruption (call/backgrounding) handling; epilogue share card; Cyg X-1
 >   contrast dive; audio drone (haptics shipped first — sound needs a design pass).
 >
-> **Parked-lens "two bubbles" fix (2026-08-08):** the parked hole read as a dark ball
-> plus a detached hoop. Diagnosis (red-tint diagnostic): the dark ball was NOT the
-> bake — it was *scene-sampled* bent rays. The lens treats every scene pixel as
-> background behind the hole, but the bulge's warm fog also fills the space in FRONT
-> of it — deflecting that light punched a dark hole in the fog. Fixes, all β-faded so
-> the dive keeps its NASA-dark sky: (1) **un-lensed foreground veil** — the scene
-> target is mipmapped and the lens re-composites a blurred sample of the pixel's
-> ORIGINAL screen position over content-replaced rays (faint wash over the shadow
-> too; the fog is in front of it); (2) **lensed stars while parked** — the unsharp
-> star-split now gates on bend as well as dive state, with a tangential 3-tap
-> (rotation about the hole axis, arc length ∝ bend) that smears them into the
-> signature Einstein arcs; (3) screen→bake feather widened 0.015 → 0.10 and a smooth
-> **magnification brightening** toward the ring replaces the isolated hoop.
+> **Parked-lens "two bubbles" fix (2026-08-08, solved after several wrong theories):**
+> the parked hole read as a dark ball plus a detached hoop, then as two lobes flanking
+> the shadow. Contributing fixes, all β-faded so the dive keeps its NASA-dark sky:
+> (1) **un-lensed foreground veil** — the scene target is mipmapped and the lens
+> re-composites a blurred sample of the pixel's ORIGINAL screen position over
+> content-replaced rays (the bulge fog in FRONT of the hole must not be lensed away;
+> faint wash over the shadow too); (2) **lensed stars while parked** — the unsharp
+> star-split gates on bend as well as dive state, tangentially smeared into Einstein
+> arcs; (3) screen→bake feather widened 0.015 → 0.10. **The decisive trio** (landed
+> together; a stale metallib had masked each one individually — verify `default.metallib`
+> mtime when a shader edit "does nothing"): the bake **culls everything within 400 pc
+> of the hole** (any compact content behind the hole — core glow OR the nuclear star
+> swarm — double-images into flanking lobes; the lensed sky must be distant background
+> only), **strongly-bent rays prefer the culled bake** even when their deflected point
+> is still on-screen (the screen-sample path re-images near-hole content and no bake
+> cull can touch it), and the **disc's outer expanse dissolves** (smoothstep from
+> t = 0.45 — the hard rOut cutoff drew a bounded slab whose elliptical outline read as
+> bubbles). Perf guard: camera re-bake at ≥12% hole-distance movement / 0.5 s min
+> (5%/0.2 s re-baked the whole sprite scene up to 5×/s and tanked device frame rate);
+> tangential multi-taps collapse to single samples below visible bend.
 >
 > **Not yet done:** on-device verification (trigger, perf, HUD liveness), Kerr spin /
 > frame-dragging, bake longitude-seam wrap, and the SwiftUI AttributeGraph wedge under
