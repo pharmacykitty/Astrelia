@@ -328,8 +328,12 @@ final class GalaxyMetalRenderer: NSObject {
         let w = Int(size.width), h = Int(size.height)
         guard let device, w > 0, h > 0 else { return false }
         if sceneColor?.width != w || sceneColor?.height != h {
+            // Mipmapped: the lens pass samples a blurred level for the un-lensed
+            // foreground veil (the bulge fog in FRONT of the hole must not be
+            // lensed away — without the veil the bent region punches a dark
+            // "bubble" in the fog).
             let cd = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm,
-                                                              width: w, height: h, mipmapped: false)
+                                                              width: w, height: h, mipmapped: true)
             cd.usage = [.renderTarget, .shaderRead]
             cd.storageMode = .private
             let dd = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .depth32Float,
@@ -691,6 +695,11 @@ final class GalaxyMetalRenderer: NSObject {
             off.depthAttachment.storeAction = .dontCare
             off.depthAttachment.clearDepth = 1.0
             encodeSprites(cb, into: off)
+            // Mip chain for the lens pass's blurred foreground-veil sample.
+            if let blit = cb.makeBlitCommandEncoder() {
+                blit.generateMipmaps(for: sceneColor)
+                blit.endEncoding()
+            }
 
             // 2) Lens pass: bends the scene around the hole, draws the shadow /
             //    photon ring / disc in place — into the drawable directly at full

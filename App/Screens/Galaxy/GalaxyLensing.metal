@@ -295,6 +295,7 @@ fragment float4 lens_fragment(LensVSOut in [[stage_in]],
         float alpha = 2.0 * u.rs / max(perp, u.rs * 3.0);
         outDir = normalize(dir - (cvec / max(perp, 1e-5)) * alpha);
     }
+    float bendRaw = 1.0 - dot(outDir, dir);               // how far the hole moved this ray
 
     // Background: the rendered galaxy sampled where the bent ray points, the baked
     // equirect sky when that leaves the frame (or during a dive, when the whole
@@ -307,7 +308,10 @@ fragment float4 lens_fragment(LensVSOut in [[stage_in]],
         if (clip.w > 0.0) {
             float2 suv = float2(clip.x / clip.w * 0.5 + 0.5, 0.5 - clip.y / clip.w * 0.5);
             float2 m = min(suv, 1.0 - suv);
-            screenW = saturate(min(m.x, m.y) / 0.015);
+            // Wide feather: at 0.015 the screen→bake handoff drew a visible
+            // circle around the hole (the "bubble" edge) — blend over ~10% of
+            // the frame instead so the two sources cross-fade invisibly.
+            screenW = saturate(min(m.x, m.y) / 0.10);
             if (screenW > 0.0) {
                 float4 s = sceneTex.sample(smp, suv);
                 bg = s.rgb; bgA = s.a;
@@ -345,11 +349,27 @@ fragment float4 lens_fragment(LensVSOut in [[stage_in]],
             // streaming past on approach, surviving longest at the frame edge
             // inside (Hamilton's sideways sky), guttering out before the flash.
             float diveAmt = saturate(max(u.beta * 1.8, u.aperture * 2.0));
+            // Strongly-bent rays get the star treatment even PARKED: without it
+            // the lensed region sampled only the blurred bake and rendered as a
+            // flat dark disc around the hole ("a bubble") — lensing should show
+            // the sky's own stars, warped.
+            float starGate = max(diveAmt, saturate(bendRaw * 40.0));
             float3 bStars = float3(0.0);
-            if (diveAmt > 0.001) {
+            if (starGate > 0.001) {
                 float lodStar = clamp(max(lodF * 0.6, 1.0), 1.0, 2.5);   // soft dots, never confetti
                 float3 coarse = skyTex.sample(wrapSmp, buv, level(lodStar + 3.0)).rgb;
-                bStars = max(skyTex.sample(wrapSmp, buv, level(lodStar)).rgb - coarse, 0.0);
+                // Tangential 3-tap: rotate the sample direction slightly around
+                // the hole axis, arc length growing with the bend — stars near
+                // the Einstein ring stretch into short tangential ARCS, the
+                // signature strong-lensing cue.
+                float3 axisH = normalize(hp);
+                float delta = min(0.035, bendRaw * 0.35);
+                float3 acc3 = float3(0.0);
+                for (int k = -1; k <= 1; k++) {
+                    float3 d2 = normalize(outDir + cross(axisH, outDir) * (delta * float(k)));
+                    acc3 += skyTex.sample(wrapSmp, bh_equirect(d2), level(lodStar)).rgb;
+                }
+                bStars = max(acc3 * (1.0 / 3.0) - coarse, 0.0);
                 // Compact bright bake patches (nebulae, the nucleus) survive the
                 // unsharp split as big "stars" and gain into pale smears. Real
                 // point stars sit on a DARK neighbourhood (coarse ≈ 0); suppress
@@ -392,8 +412,9 @@ fragment float4 lens_fragment(LensVSOut in [[stage_in]],
                 // hard as speed builds (parked views untouched, bknee = 0).
                 b.rgb *= 1.0 - 0.72 * bknee;
             }
-            if (diveAmt > 0.001) {
-                // The surviving sky. Approach: stars everywhere, streaming.
+            if (starGate > 0.001) {
+                // The surviving sky. Parked: the lensed field shows its stars.
+                // Approach: stars everywhere, streaming.
                 // Interior: survival migrates to the frame edge (the sideways sky
                 // outlives fore/aft), the dots redden as they die, and the whole
                 // population gutters out across r ~0.5 → 0.2 so the LAST star
@@ -409,9 +430,13 @@ fragment float4 lens_fragment(LensVSOut in [[stage_in]],
                 float life = 1.0 - smoothstep(0.60, 0.93, u.aperture);
                 float slum = dot(bStars, float3(0.30, 0.55, 0.15));
                 float3 starCol = mix(bStars, slum * float3(1.0, 0.45, 0.22), inside * 0.7);
-                b.rgb += starCol * (2.4 + 0.8 * inside) * surv * life;
-                b.a = max(b.a, saturate(slum * 1.5) * surv * life * 0.6);
+                b.rgb += starCol * (2.4 + 0.8 * inside) * surv * life * starGate;
+                b.a = max(b.a, saturate(slum * 1.5) * surv * life * starGate * 0.6);
             }
+            // Magnification glow: lensing brightens smoothly toward the ring —
+            // a continuous ramp instead of a thin isolated hoop over a dark gap.
+            // Fades out as the dive builds (the plunge keeps its NASA-dark sky).
+            b.rgb *= 1.0 + 0.6 * saturate(bendRaw * 20.0) * (1.0 - saturate(u.beta * 1.8));
             b.a = max(b.a, bandProfile * 0.5);
             bg = mix(bg, b.rgb, bakeW);
             bgA = mix(bgA, b.a, bakeW);
@@ -453,6 +478,24 @@ fragment float4 lens_fragment(LensVSOut in [[stage_in]],
     // The shadow must be a solid black ball (not the UI gradient leaking through);
     // the disc adds its own coverage on top of whatever background survives.
     float a = captured ? 1.0 : max(bgA * trans, saturate(1.0 - trans));
+
+    // Un-lensed foreground veil. The lens treats every scene pixel as living
+    // BEHIND the hole, but the bulge's warm fog fills the space in front of it
+    // too — deflecting that light punched a dark "bubble" in the fog around the
+    // whole influence region. Re-composite a blurred sample of this pixel's
+    // ORIGINAL screen position over content-replaced rays (incl. a faint wash
+    // over the shadow — the fog is in front of it). Fades with β so the dive
+    // keeps its NASA-dark sky.
+    {
+        constexpr sampler veilSmp(address::clamp_to_edge, filter::linear, mip_filter::linear);
+        float veilGate = max(saturate(bendRaw * 30.0), captured ? 1.0 : 0.0);
+        float veilW = 0.5 * veilGate * (1.0 - saturate(u.beta * 1.5));
+        if (veilW > 0.001) {
+            float3 veil = sceneTex.sample(veilSmp, in.uv, level(4.0)).rgb;
+            col += veil * veilW;
+            a = max(a, saturate(dot(veil, float3(0.30, 0.55, 0.15)) * 2.0) * veilW);
+        }
+    }
 
     // bh_post gets the SCREEN ray (pre-aberration): the interior's centre-vs-edge
     // weighting is compositional — post-warp directions all crowd toward fwd.

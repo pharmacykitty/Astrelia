@@ -149,6 +149,20 @@
 >   interruption (call/backgrounding) handling; epilogue share card; Cyg X-1
 >   contrast dive; audio drone (haptics shipped first — sound needs a design pass).
 >
+> **Parked-lens "two bubbles" fix (2026-08-08):** the parked hole read as a dark ball
+> plus a detached hoop. Diagnosis (red-tint diagnostic): the dark ball was NOT the
+> bake — it was *scene-sampled* bent rays. The lens treats every scene pixel as
+> background behind the hole, but the bulge's warm fog also fills the space in FRONT
+> of it — deflecting that light punched a dark hole in the fog. Fixes, all β-faded so
+> the dive keeps its NASA-dark sky: (1) **un-lensed foreground veil** — the scene
+> target is mipmapped and the lens re-composites a blurred sample of the pixel's
+> ORIGINAL screen position over content-replaced rays (faint wash over the shadow
+> too; the fog is in front of it); (2) **lensed stars while parked** — the unsharp
+> star-split now gates on bend as well as dive state, with a tangential 3-tap
+> (rotation about the hole axis, arc length ∝ bend) that smears them into the
+> signature Einstein arcs; (3) screen→bake feather widened 0.015 → 0.10 and a smooth
+> **magnification brightening** toward the ring replaces the isolated hoop.
+>
 > **Not yet done:** on-device verification (trigger, perf, HUD liveness), Kerr spin /
 > frame-dragging, bake longitude-seam wrap, and the SwiftUI AttributeGraph wedge under
 > 60 Hz flight churn (pre-existing; the dive routes around it, manual free-fly on the
