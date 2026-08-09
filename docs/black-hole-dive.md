@@ -17,9 +17,18 @@
 >   step, 240 cap) for rays near the hole and applies the **closed-form weak-field
 >   deflection (α ≈ 2rs/b)** for every other ray, so bending decays smoothly to zero with
 >   no seam. Escaped rays sample the offscreen scene where they now point (the real galaxy
->   lenses into Einstein rings), falling back to a **2048×1024 equirect panorama** baked
->   from the hole (`bake_vertex/fragment`, re-baked per scene version) + a procedural warm
->   bulge ambient (which fades with β so the plunge isn't washed out). The procedural disc:
+>   lenses into Einstein rings), falling back to a **2048×1024 equirect panorama baked
+>   from the CAMERA** (`bake_vertex/fragment` — re-baked per scene version and when the
+>   camera moves ≥5% of its hole distance, rate-limited; camera-centred since 2026-08-08:
+>   the old hole-centred bake's parallax mismatch made the lensed region read as a
+>   stitched-on object). Soft world-scale **core-glow sprites within 400 pc of the hole
+>   are culled from the bake** — lensed, an extended bright glow double-images into two
+>   round lobes ("the two bubbles"); the lensed sky keeps stars/grain (structure reads
+>   as bending) while the direct view keeps the glow. The base bake sample is
+>   **tangentially sheared** (5 taps about the hole axis, arc ∝ bend) so lensed images
+>   stretch; a trace un-lensed **foreground veil** (blurred scene at the original screen
+>   position) keeps fog continuity, incl. a faint wash on the shadow. Plus a procedural
+>   warm bulge ambient (which fades with β so the plunge isn't washed out). The procedural disc:
 >   temp ramp, per-pixel Keplerian **Doppler beaming**, gravitational redshift, and
 >   band-noise that **carves filament gaps** (alpha driven by the texture, so the disc reads
 >   as fire-streams, not fog). Shadow = capture; photon ring falls out of the geometry.
