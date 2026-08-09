@@ -337,10 +337,30 @@ fragment float4 lens_fragment(LensVSOut in [[stage_in]],
             // and sprays coloured grain. Two smooth terms instead: the dive state
             // (magnified stars soften into round dots) and the bend amount
             // (strongly-lensed sectors compress many images — blur matches that).
+            float diveAmt = saturate(max(u.beta * 1.8, u.aperture * 2.0));
             float dlod = saturate(max(u.aperture * 1.4, (u.beta - 0.15) * 1.3)) * 2.2;
-            float blod = saturate((1.0 - dot(outDir, dir)) * 3.0) * 2.5;
+            // Bend-blur is mostly a DIVE need (violent warp rates). Parked, heavy
+            // blur melts compact bright content (the nuclear star swarm) into
+            // smooth cream blobs beside the shadow — keep it granular so the
+            // lensed cluster reads as warped stars, not a blob.
+            float blod = saturate((1.0 - dot(outDir, dir)) * 3.0) * 2.5 * mix(0.4, 1.0, diveAmt);
             float lodF = clamp(dlod + blod, 0.0, 6.0);
-            float4 b = skyTex.sample(wrapSmp, buv, level(lodF));
+            // Tangentially SHEARED base sample: a lensed image is stretched into
+            // an arc around the hole, and without the stretch the (physically
+            // real) double image of the galaxy's radiant core reads as two round
+            // bubbles beside the shadow — the original sin of this whole look.
+            // Three taps rotated about the hole axis, arc length ∝ bend.
+            float4 b;
+            {
+                float3 axisB = normalize(hp);
+                float deltaB = min(0.05, bendRaw * 0.55);
+                b = float4(0.0);
+                for (int k = -2; k <= 2; k++) {
+                    float3 dB = normalize(outDir + cross(axisB, outDir) * (deltaB * float(k)));
+                    b += skyTex.sample(wrapSmp, bh_equirect(dB), level(lodF));
+                }
+                b *= 1.0 / 5.0;
+            }
             // Council fix (2026-08-04): the dive's hard bake dim deleted the
             // UNIVERSE along with the glow — and falling is only legible as the
             // loss of a referent. Unsharp-split the bake: a coarse mip is the
@@ -348,7 +368,6 @@ fragment float4 lens_fragment(LensVSOut in [[stage_in]],
             // POINT STARS, re-added after the dims so the sky stays populated —
             // streaming past on approach, surviving longest at the frame edge
             // inside (Hamilton's sideways sky), guttering out before the flash.
-            float diveAmt = saturate(max(u.beta * 1.8, u.aperture * 2.0));
             // Strongly-bent rays get the star treatment even PARKED: without it
             // the lensed region sampled only the blurred bake and rendered as a
             // flat dark disc around the hole ("a bubble") — lensing should show
@@ -434,7 +453,12 @@ fragment float4 lens_fragment(LensVSOut in [[stage_in]],
                 float life = 1.0 - smoothstep(0.60, 0.93, u.aperture);
                 float slum = dot(bStars, float3(0.30, 0.55, 0.15));
                 float3 starCol = mix(bStars, slum * float3(1.0, 0.45, 0.22), inside * 0.7);
-                b.rgb += starCol * (2.4 + 0.8 * inside) * surv * life * starGate;
+                // Parked, the camera-centred bake already carries the real sky —
+                // the split only needs a gentle lift (2.4× there turned dense
+                // cluster regions into cream blobs); the dive keeps the full
+                // gain, where the dimmed sky needs the stars pulled back out.
+                float gain = mix(1.15, 2.4 + 0.8 * inside, diveAmt);
+                b.rgb += starCol * gain * surv * life * starGate;
                 b.a = max(b.a, saturate(slum * 1.5) * surv * life * starGate * 0.6);
             }
             // Magnification glow, kept SUBTLE: brightening smooth fog paints
@@ -494,8 +518,10 @@ fragment float4 lens_fragment(LensVSOut in [[stage_in]],
         constexpr sampler veilSmp(address::clamp_to_edge, filter::linear, mip_filter::linear);
         // The shadow keeps only a TRACE of fog (0.22): at half strength it read
         // as a tan glass ball — the black anchor is what stops the lens region
-        // reading as a solid object.
-        float veilGate = max(saturate(bendRaw * 30.0) * 0.65, captured ? 0.22 : 0.0);
+        // reading as a solid object. Bent rays get barely any: the camera-centred
+        // bake already carries the real foreground fog, and stacking the veil on
+        // top double-counts it.
+        float veilGate = max(saturate(bendRaw * 30.0) * 0.25, captured ? 0.22 : 0.0);
         float veilW = 0.5 * veilGate * (1.0 - saturate(u.beta * 1.5));
         if (veilW > 0.001) {
             float3 veil = sceneTex.sample(veilSmp, in.uv, level(4.0)).rgb;
@@ -534,13 +560,16 @@ fragment float4 lens_fragment(LensVSOut in [[stage_in]],
 // ---- Equirect sky bake ------------------------------------------------------
 //
 // Renders the sprite scene (additive light only) into a 2048×1024 equirectangular
-// panorama as seen from the black hole, so bent rays that leave the screen still
-// have the real galaxy to sample. Self-contained: no handedness or seam logic
-// beyond clamping (sprites straddling the longitude seam are accepted losses).
+// panorama as seen FROM THE CAMERA (re-baked as it moves), so bent rays that
+// leave the screen sample the same sky the screen shows — one continuous
+// background, no content jump at the handoff. Self-contained: no handedness or
+// seam logic beyond clamping (sprites straddling the longitude seam are
+// accepted losses).
 
 struct BakeUniforms {
-    float hx, hy, hz, skipRadius;   // bake origin (world pc); cull sprites closer than this
-    float texW, texH, pad0, pad1;
+    float ox, oy, oz, skipRadius;   // bake origin = CAMERA (world pc); cull sprites closer than this
+    float hx, hy, hz, holeSkip;     // hole position + beacon cull radius (its sprite glow must not double into the lensed sky)
+    float texW, texH, coreSkip, pad1; // soft world-scale glow within coreSkip of the hole stays OUT of the lensed sky
 };
 
 struct SpriteInstanceB {            // matches SpriteInstance in GalaxyShaders.metal
@@ -578,9 +607,17 @@ vertex BakeVSOut bake_vertex(uint vid [[vertex_id]],
     out.color = float4(s.r, s.g, s.b, s.a);
     out.softness = s.softness;
 
-    float3 rel = float3(s.px, s.py, s.pz) - float3(u.hx, u.hy, u.hz);
+    float3 rel = float3(s.px, s.py, s.pz) - float3(u.ox, u.oy, u.oz);
     float dist = length(rel);
-    if (dist < u.skipRadius) {                    // too close to the hole (its own beacon)
+    float holeDist = length(float3(s.px, s.py, s.pz) - float3(u.hx, u.hy, u.hz));
+    // Cull: sprites hugging the camera; the hole's own beacon; and the SMOOTH
+    // radiant-core glow near the hole (soft, world-sized). Lensed, an extended
+    // bright glow behind the hole double-images into big round lobes — the
+    // "two bubbles" — physically honest but unreadable. The lensed sky keeps
+    // its stars and grain (structure reads as bending); the direct view keeps
+    // the full glow.
+    bool softCore = holeDist < u.coreSkip && s.softness > 0.45 && s.mode < 0.5;
+    if (dist < u.skipRadius || holeDist < u.holeSkip || softCore) {
         out.position = float4(2.0, 2.0, 2.0, 1.0);
         return out;
     }

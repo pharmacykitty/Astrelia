@@ -116,8 +116,9 @@ private struct LensUniforms {
 
 /// Matches `BakeUniforms` in GalaxyLensing.metal (8 scalars, 32 bytes).
 private struct BakeUniforms {
-    var hx: Float, hy: Float, hz: Float, skipRadius: Float
-    var texW: Float, texH: Float, pad0: Float, pad1: Float
+    var ox: Float, oy: Float, oz: Float, skipRadius: Float   // bake origin = camera
+    var hx: Float, hy: Float, hz: Float, holeSkip: Float     // hole pos + beacon cull
+    var texW: Float, texH: Float, coreSkip: Float, pad1: Float
 }
 
 @MainActor
@@ -567,11 +568,24 @@ final class GalaxyMetalRenderer: NSObject {
                             crossing: c.dive.crossing, pad1: 0)
     }
 
-    /// Renders the additive scene into the equirect panorama, as seen from the hole.
-    /// Re-baked only when the scene itself changes (art toggles, catalogue load).
+    /// Renders the additive scene into the equirect panorama, as seen FROM THE
+    /// CAMERA. It used to bake from the hole's position — the parallax mismatch
+    /// between panorama and scene content made the strongly-bent region read as
+    /// a different object stitched over the sky, no matter how the handoff was
+    /// feathered. Camera-centred, the bent rays sample the same sky the screen
+    /// shows and the lens region becomes THE background, bent. Re-baked when
+    /// the scene version changes or the camera moves ≥5% of its hole distance
+    /// (rate-limited; staleness during the fast plunge hides under the dive's
+    /// aperture dimming).
+    private var bakedEye = SIMD3<Float>(.nan, 0, 0)
+    private var lastBakeTime: CFTimeInterval = 0
+
     private func bakeSkyIfNeeded(_ cb: MTLCommandBuffer) {
-        guard camera.holeRs > 0, bakedVersion != loadedVersion,
-              let device, let bakePipeline else { return }
+        guard camera.holeRs > 0, let device, let bakePipeline else { return }
+        let holeDist = max(simd_distance(camera.eye, camera.holePos), camera.holeRs)
+        let moved = bakedEye.x.isNaN || simd_distance(bakedEye, camera.eye) > 0.05 * holeDist
+        let now = CACurrentMediaTime()
+        guard bakedVersion != loadedVersion || (moved && now - lastBakeTime > 0.2) else { return }
         if skyBake == nil {
             // Mipmapped: the lens pass samples this with auto-derivative mip
             // filtering — without mips the panorama's star sprites alias into
@@ -589,13 +603,14 @@ final class GalaxyMetalRenderer: NSObject {
         rpd.colorAttachments[0].storeAction = .store
         rpd.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
         guard let enc = cb.makeRenderCommandEncoder(descriptor: rpd) else { return }
-        // Skip only the hole's own beacon. The nucleus glow STAYS in the panorama:
-        // the lensed sky must match the warm haze the screen shows around it, or
-        // the strongly-bent sectors read as alien dark bubbles. The dive darkens
-        // the sky later via the interior aperture fade instead.
-        var bu = BakeUniforms(hx: camera.holePos.x, hy: camera.holePos.y, hz: camera.holePos.z,
-                              skipRadius: camera.holeRs * 2.5,
-                              texW: 2048, texH: 1024, pad0: 0, pad1: 0)
+        // Origin = the camera. Cull only sprites hugging the camera itself (they
+        // have no stable direction) and the hole's own beacon (the lens draws
+        // the hole; its sprite glow must not also appear in the lensed sky).
+        var bu = BakeUniforms(ox: camera.eye.x, oy: camera.eye.y, oz: camera.eye.z,
+                              skipRadius: 0.4 * holeDist * 0.05,
+                              hx: camera.holePos.x, hy: camera.holePos.y, hz: camera.holePos.z,
+                              holeSkip: camera.holeRs * 2.5,
+                              texW: 2048, texH: 1024, coreSkip: 400, pad1: 0)
         enc.setRenderPipelineState(bakePipeline)
         for (buffer, count) in [(additiveBuffer, additiveCount), (landmarkBuffer, landmarkCount)] {
             guard count > 0, let buffer else { continue }
@@ -609,6 +624,8 @@ final class GalaxyMetalRenderer: NSObject {
             blit.endEncoding()
         }
         bakedVersion = loadedVersion
+        bakedEye = camera.eye
+        lastBakeTime = now
     }
 
     /// Internal lens resolution from a march-cost budget. The expensive pixels are
