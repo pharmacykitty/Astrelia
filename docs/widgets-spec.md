@@ -29,7 +29,7 @@ link cleanly into a widget target).
 - Shares the bundled catalogs it needs (Moon/planets need no catalog; star-dependent widgets
   would need the resource — prefer widgets that **don't** need the 560 KB star CSV to keep the
   extension light).
-- **App Group** (`group.com.astrolabe.app`) so the widget can read the user's
+- **App Group** (`group.pink.ely.astrolabe`) so the widget can read the user's
   **home location** and **default chart id** written by `AppPreferences`
   (see `docs/preferences-spec.md` — store shared prefs in the group's `UserDefaults`).
   SwiftData `SavedChart` access from the widget: either expose the model container to the app

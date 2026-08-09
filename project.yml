@@ -1,6 +1,6 @@
 name: Astrolabe
 options:
-  bundleIdPrefix: com.astrolabe
+  bundleIdPrefix: pink.ely
   deploymentTarget:
     iOS: "26.0"
   createIntermediateGroups: true
@@ -30,7 +30,7 @@ targets:
         product: CelestialCore
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.astrolabe.app
+        PRODUCT_BUNDLE_IDENTIFIER: pink.ely.astrolabe
         TARGETED_DEVICE_FAMILY: "1,2"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         GENERATE_INFOPLIST_FILE: YES
