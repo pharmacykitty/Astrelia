@@ -394,7 +394,11 @@ fragment float4 lens_fragment(LensVSOut in [[stage_in]],
             float bandProfile = exp(-planeDist * planeDist * 55.0);
             float bandTex = 0.55 + 0.45 * bh_noise(float2(atan2(outDir.y, outDir.x) * 6.0,
                                                           planeDist * 14.0));
-            b.rgb += float3(0.66, 0.58, 0.48) * (0.12 * bandProfile * bandTex);
+            // Dive-weighted: parked, this procedural great-circle ribbon drew a
+            // hard seam-like line across the whole lens region — the real baked
+            // Milky Way carries the parked look; the ribbon is the dive's.
+            b.rgb += float3(0.66, 0.58, 0.48)
+                   * (0.12 * bandProfile * bandTex * (0.2 + 0.8 * saturate(u.beta * 1.6)));
             float haze = exp(-planeDist * planeDist * 5.0) * 0.05
                        * (1.0 - 0.8 * saturate(u.beta / 0.7))
                        * saturate((length(hp) / u.rs - 5.0) / 15.0);
@@ -433,10 +437,10 @@ fragment float4 lens_fragment(LensVSOut in [[stage_in]],
                 b.rgb += starCol * (2.4 + 0.8 * inside) * surv * life * starGate;
                 b.a = max(b.a, saturate(slum * 1.5) * surv * life * starGate * 0.6);
             }
-            // Magnification glow: lensing brightens smoothly toward the ring —
-            // a continuous ramp instead of a thin isolated hoop over a dark gap.
-            // Fades out as the dive builds (the plunge keeps its NASA-dark sky).
-            b.rgb *= 1.0 + 0.6 * saturate(bendRaw * 20.0) * (1.0 - saturate(u.beta * 1.8));
+            // Magnification glow, kept SUBTLE: brightening smooth fog paints
+            // glossy dome rims (bulging-object read) — lensing only reads on
+            // structure. Fades out as the dive builds.
+            b.rgb *= 1.0 + 0.2 * saturate(bendRaw * 20.0) * (1.0 - saturate(u.beta * 1.8));
             b.a = max(b.a, bandProfile * 0.5);
             bg = mix(bg, b.rgb, bakeW);
             bgA = mix(bgA, b.a, bakeW);
@@ -488,7 +492,10 @@ fragment float4 lens_fragment(LensVSOut in [[stage_in]],
     // keeps its NASA-dark sky.
     {
         constexpr sampler veilSmp(address::clamp_to_edge, filter::linear, mip_filter::linear);
-        float veilGate = max(saturate(bendRaw * 30.0), captured ? 1.0 : 0.0);
+        // The shadow keeps only a TRACE of fog (0.22): at half strength it read
+        // as a tan glass ball — the black anchor is what stops the lens region
+        // reading as a solid object.
+        float veilGate = max(saturate(bendRaw * 30.0) * 0.65, captured ? 0.22 : 0.0);
         float veilW = 0.5 * veilGate * (1.0 - saturate(u.beta * 1.5));
         if (veilW > 0.001) {
             float3 veil = sceneTex.sample(veilSmp, in.uv, level(4.0)).rgb;
