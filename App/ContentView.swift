@@ -180,7 +180,11 @@ struct ContentView: View {
             FilterSheet(filters: $filters, catalog: store.catalog)
                 .presentationDetents([.medium, .large])
         }
-        .sheet(item: $shownSheet) { screen in
+        // Full-screen, not a sheet: these are the app's destinations, and on the
+        // night-ink theme a sheet's top gap reads as dead space, not a card edge
+        // (the Galaxy Map set the precedent). The Close button replaces
+        // swipe-to-dismiss.
+        .fullScreenCover(item: $shownSheet) { screen in
             NavigationStack {
                 destinationView(screen)
                     .toolbar {

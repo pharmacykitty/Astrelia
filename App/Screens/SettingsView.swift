@@ -9,22 +9,23 @@ struct SettingsView: View {
     @State private var confirmReset = false
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                Theme.spaceGradient.ignoresSafeArea()
-                Form {
-                    unitsSection
-                    skySection
-                    galaxySection
-                    locationSection
-                    motionSection
-                    resetSection
-                }
-                .scrollContentBackground(.hidden)
+        // No NavigationStack of its own: the presenter (ContentView's
+        // full-screen cover, or the snapshot harness) provides it — a nested
+        // stack would draw a second bar above the Close button.
+        ZStack {
+            Theme.spaceGradient.ignoresSafeArea()
+            Form {
+                unitsSection
+                skySection
+                galaxySection
+                locationSection
+                motionSection
+                resetSection
             }
-            .navigationTitle("Settings")
-            .navigationBarTitleDisplayMode(.inline)
+            .scrollContentBackground(.hidden)
         }
+        .navigationTitle("Settings")
+        .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             // Only warm up location if the user already granted it — opening
             // Settings must not itself trigger the system permission prompt
