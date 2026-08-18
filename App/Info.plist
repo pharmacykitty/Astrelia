@@ -5,6 +5,10 @@
 	<!-- Base Info.plist: only what the generated one can't express — the custom
 	     launch screen (night ink + a dim rete mark). Everything else still comes
 	     from GENERATE_INFOPLIST_FILE + the INFOPLIST_KEY_* settings in project.yml. -->
+	<!-- No network calls, no proprietary encryption: skips the per-build
+	     export-compliance question in App Store Connect. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIColorName</key>
