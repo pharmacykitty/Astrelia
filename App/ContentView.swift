@@ -375,8 +375,8 @@ struct ContentView: View {
             let denied = provider.authorization == .denied || provider.authorization == .restricted
             return SkyStatus(
                 symbol: "location.slash",
-                message: denied ? "Stellaria needs location access to place the sky."
-                                : "Allow location access so Stellaria can compute your sky.",
+                message: denied ? "Citlali needs location access to place the sky."
+                                : "Allow location access so Citlali can compute your sky.",
                 hint: denied ? "Enable it in Settings." : nil,
                 showSettings: denied)
         }

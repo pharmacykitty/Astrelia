@@ -137,7 +137,7 @@ struct SettingsView: View {
                     Button("Reset", role: .destructive) { prefs.reset() }
                 }
         } footer: {
-            Text("Stellaria \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")")
+            Text("Citlali \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")")
                 .frame(maxWidth: .infinity, alignment: .center)
         }
         .listRowBackground(Color.white.opacity(0.05))

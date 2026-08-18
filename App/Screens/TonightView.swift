@@ -75,7 +75,7 @@ struct TonightView: View {
         if observer.denied && fixedLocation == nil && homeLocation == nil {
             ContentUnavailableView("Location needed",
                                    systemImage: "location.slash",
-                                   description: Text("Tonight's sky depends on where you are. Enable location for Stellaria in Settings — or save a home location in the app's Settings."))
+                                   description: Text("Tonight's sky depends on where you are. Enable location for Citlali in Settings — or save a home location in the app's Settings."))
                 .foregroundStyle(.white)
         } else {
             HStack { Spacer(); ProgressView().tint(.white); Spacer() }.padding(.top, 40)

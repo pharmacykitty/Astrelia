@@ -31,7 +31,7 @@ struct AboutView: View {
             Text("Sources & Credits")
                 .font(.system(.largeTitle, design: .serif).weight(.bold))
                 .foregroundStyle(.white).multilineTextAlignment(.center)
-            Text("Every position, fact, and figure in Stellaria comes from open astronomical data and published algorithms. The people and projects behind them:")
+            Text("Every position, fact, and figure in Citlali comes from open astronomical data and published algorithms. The people and projects behind them:")
                 .font(.subheadline).foregroundStyle(.white.opacity(0.65))
                 .multilineTextAlignment(.center)
         }
@@ -103,7 +103,7 @@ struct AboutView: View {
 
     private var footer: some View {
         VStack(spacing: 6) {
-            Text("Stellaria")
+            Text("Citlali")
                 .font(.system(.headline, design: .serif)).foregroundStyle(.white.opacity(0.8))
             Text("Built with respect for the open astronomy community.")
                 .font(.caption).foregroundStyle(.white.opacity(0.45))

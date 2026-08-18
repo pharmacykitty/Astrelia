@@ -1,4 +1,4 @@
-name: Stellaria
+name: Citlali
 options:
   bundleIdPrefix: pink.ely
   deploymentTarget:
@@ -20,7 +20,7 @@ packages:
     path: ../AstroPackages/CelestialCore
 
 targets:
-  Stellaria:
+  Citlali:
     type: application
     platform: iOS
     sources:
@@ -30,17 +30,17 @@ targets:
         product: CelestialCore
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: pink.ely.stellaria
+        PRODUCT_BUNDLE_IDENTIFIER: pink.ely.citlali
         TARGETED_DEVICE_FAMILY: "1,2"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         GENERATE_INFOPLIST_FILE: YES
         # Launch screen lives in App/Info.plist (UILaunchScreen dict — night-ink
         # colour + dim rete mark); the generated plist merges on top of it.
         INFOPLIST_FILE: App/Info.plist
-        INFOPLIST_KEY_CFBundleDisplayName: Stellaria
+        INFOPLIST_KEY_CFBundleDisplayName: Citlali
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         INFOPLIST_KEY_UIStatusBarStyle: UIStatusBarStyleLightContent
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait
-        INFOPLIST_KEY_NSLocationWhenInUseUsageDescription: "Stellaria uses your location to compute the real positions of the Sun, Moon, and stars in your sky."
-        INFOPLIST_KEY_NSMotionUsageDescription: "Stellaria uses device motion to know where your phone is pointed at the sky."
-        INFOPLIST_KEY_NSCameraUsageDescription: "Stellaria uses the camera to overlay the sky on your real surroundings in AR mode."
+        INFOPLIST_KEY_NSLocationWhenInUseUsageDescription: "Citlali uses your location to compute the real positions of the Sun, Moon, and stars in your sky."
+        INFOPLIST_KEY_NSMotionUsageDescription: "Citlali uses device motion to know where your phone is pointed at the sky."
+        INFOPLIST_KEY_NSCameraUsageDescription: "Citlali uses the camera to overlay the sky on your real surroundings in AR mode."

@@ -1,8 +1,8 @@
 {
-  "name": "stellaria-web",
+  "name": "citlali-web",
   "version": "0.0.0",
   "private": true,
-  "description": "Web workspace + Playwright headless tests for Stellaria",
+  "description": "Web workspace + Playwright headless tests for Citlali",
   "type": "module",
   "scripts": {
     "test": "playwright test",
