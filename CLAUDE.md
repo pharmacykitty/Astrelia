@@ -59,7 +59,7 @@ project.yml                # XcodeGen spec — the .xcodeproj is generated, not 
 ### Sister repos (the 2026-07-15 split)
 The original single app carried both astronomy and a full astrology suite; it was split for focus and commercialization:
 - **`~/Developer/Astrolabe`** (this repo) — the astronomy app, **Stellaria** (folder predates the 2026-08-18 naming). Depends on `CelestialCore` only.
-- **`~/Developer/Ecliptica`** — the astrology app (charts, transits, synastry, predictive, 3D celestial sphere). Depends on `CelestialCore` + `Astrology`. It carries **duplicated copies** of `Theme.swift`, `LuminousGlyph`, `StarCatalogStore.swift`, `Constellations.swift`, `stars.bin`, and `constellation_lines.json` — port fixes across when touching those here.
+- **`~/Developer/Ecliptica`** — the astrology app, **Selenia** (named 2026-08-18; folder predates it): charts, transits, synastry, predictive, 3D celestial sphere. Depends on `CelestialCore` + `Astrology`. It carries **duplicated copies** of `Theme.swift`, `LuminousGlyph`, `StarCatalogStore.swift`, `Constellations.swift`, `stars.bin`, and `constellation_lines.json` — port fixes across when touching those here.
 - **`~/Developer/AstroPackages`** — the shared SPM packages (`CelestialCore` + `Astrology`, siblings so Astrology's `../CelestialCore` path works). All three repos must be checked out side by side.
 
 ### Hard problems to get right
