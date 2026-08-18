@@ -24,7 +24,7 @@ renderer that shares only the catalogue data and `CelestialCore` math.
 
 ```
 App/Screens/GalaxyMapView.swift        # the SwiftUI screen: state, camera, gestures,
-                                        #   scene-building, overlay/menu, picking, dive
+                                        #   scene-building, overlay/menu, picking
 App/Screens/Galaxy/
   GalaxyMetalRenderer.swift            # MTKView host + render passes + GPU buffers
   GalaxyShaders.metal                  # sprite vertex/fragments (additive, occluder, overlay)
@@ -134,7 +134,7 @@ behavior (`GalaxyScene` + `encodeSprites`):
   because they're nearer than the caps.
 
 Every render pass carries a `.depth32Float` attachment and every pipeline declares the
-format, so both the normal map path and the offscreen lensing/dive passes validate.
+format, so both the normal map path and the offscreen lensing passes validate.
 Caps are emitted in `appendBakedNebula` (bright baked particles where `lum > 0.3`,
 subsampled) and `appendLandmarkSprites` (procedural emission lobes, globular cores,
 galaxy bulges).
@@ -235,7 +235,7 @@ dense bakes stay (~55–60k particles, γ≈1.4) — the *renderer* now subsampl
 
 ---
 
-## Sgr A* — gravitational lensing + the dive easter egg
+## Sgr A* — gravitational lensing
 
 Sagittarius A\* is the one object **not** drawn with sprites: `GalaxyLensing.metal` is a
 full-screen post-pass over the sprite scene (rendered to an offscreen target) that marches
@@ -246,13 +246,12 @@ a baked 2048×1024 equirect panorama as the out-of-frame fallback). Near the hol
 whole frame is ray-marched, so scene+lens render at reduced internal resolution and a blit
 upscales (never via `contentScaleFactor` — that wedges SwiftUI's update graph). Sprite-side
 only a warm beacon remains (`.blackHole` case); microquasars keep the sprite model.
+Debug: `-galaxyBH` (map at the hole), `-galaxyBH -close` (parked in the heaviest march
+band for perf checks), `-fpsLog` (frame rate + lens scale every ~2 s).
 
-**The easter egg:** free-flying across ~6 rs (the point of no return) hands your actual position and velocity to a gravitational free-fall the renderer integrates — renderer-
-owned (`DiveChannel` → `applyDiveCamera`, pure functions of wall-clock time), with inverse
-relativistic aberration, the universe collapsing at the crossing, tidal stretch, a white
-flash, and an eject-with-epilogue. Full design + build notes: **`docs/black-hole-dive.md`**.
-Debug: `-galaxyBH` (map at the hole), `-galaxyBH -dive` (auto-plunge), `-dumpDive`
-(write lens frames to Documents).
+(A "dive" easter egg — free-fall across the horizon with a staged relativistic plunge —
+was built on top of this pass and **removed before release, 2026-08-18**; the lens pass
+itself is unchanged. It lives in git history if ever wanted again.)
 
 ---
 

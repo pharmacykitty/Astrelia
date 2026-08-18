@@ -2,7 +2,7 @@
 using namespace metal;
 
 // Gravitational lensing post-pass for the Galaxy Map — the real black hole at the
-// centre of the Milky Way (design of record: docs/black-hole-dive.md).
+// centre of the Milky Way.
 //
 // The sprite scene renders to an offscreen texture; this full-screen pass bends
 // every ray around Sgr A*. Rays passing near the hole march true Schwarzschild
@@ -11,9 +11,7 @@ using namespace metal;
 // so the bending decays smoothly to nothing instead of snapping off at a seam.
 // Escaped rays sample the offscreen scene where they now point — the actual
 // rendered galaxy lenses into Einstein rings — falling back to a baked equirect
-// panorama (bake_* below) when the bent ray leaves the frame. Dive uniforms
-// (beta/aperture/spaghetti/redshift/flash) stage the plunge; Swift sequences the
-// beats, the shader stays dumb.
+// panorama (bake_* below) when the bent ray leaves the frame.
 //
 // Layout note: all-scalar uniforms (no float3!) so the Swift mirrors match
 // byte-for-byte — a mismatch here is a device-only GPU hang.
@@ -25,9 +23,8 @@ struct LensUniforms {
     float fx, fy, fz, time;                       // camera forward + seconds (disc swirl)
     float hx, hy, hz, rs;                         // hole position (camera-relative, pc) + Schwarzschild radius (pc); rs ≤ 0 → passthrough
     float dnx, dny, dnz, diskInner;               // disc normal + inner radius (pc)
-    float diskOuter, beta, bakeMix, aperture;     // disc outer (pc); infall v/c; equirect blend; universe-collapse
-    float spaghetti, redshiftG, flash, discBoost; // tidal stretch; global redshift; final flash; disc flare
-    float viewW, viewH, crossing, pad1;           // + horizon-crossing ring-flare pulse
+    float diskOuter, viewW, viewH, strength;      // disc outer (pc); view size; warp strength (fades when the influence disc subtends < ~a degree)
+    float holeDepth, pad1, pad2, pad3;            // hole's log-depth for the foreground guard (< 0 → hole behind camera)
 };
 
 struct LensVSOut {
@@ -72,16 +69,6 @@ static float bh_pnoise(float x, float period, float y) {
                mix(bh_hash(float2(i0, yi + 1.0)), bh_hash(float2(i1, yi + 1.0)), sx), sy);
 }
 
-// Relativistic aberration: as β→1 the whole sky crowds toward the travel axis.
-static float3 bh_aberrate(float3 d, float3 axis, float beta) {
-    float c = dot(d, axis);
-    float3 perp = d - c * axis;
-    float pl = length(perp);
-    float cNew = (c + beta) / (1.0 + beta * c);
-    float s = sqrt(max(0.0, 1.0 - cNew * cNew));
-    return normalize(axis * cNew + (pl > 1e-5 ? perp / pl : float3(0)) * s);
-}
-
 // Equirectangular lookup for a world direction (equatorial frame, matching bake_vertex).
 static float2 bh_equirect(float3 d) {
     return float2(atan2(d.y, d.x) / (2.0 * M_PI_F) + 0.5,
@@ -92,7 +79,7 @@ static float2 bh_equirect(float3 d) {
 // Radial temperature ramp, Keplerian orbital Doppler (beaming + colour shift),
 // gravitational redshift, and a noise swirl advected at the orbital rate.
 static float4 bh_disc(float3 xp, float3 n, float rd, float rIn, float rOut,
-                      float time, float3 photonDir, float boost, float beamCap) {
+                      float time, float3 photonDir) {
     float3 e1 = normalize(cross(n, fabs(n.y) < 0.9 ? float3(0, 1, 0) : float3(1, 0, 0)));
     float3 e2 = cross(n, e1);
     float phi = atan2(dot(xp, e2), dot(xp, e1));
@@ -123,12 +110,11 @@ static float4 bh_disc(float3 xp, float3 n, float rd, float rIn, float rOut,
     // and transmit, or stacked lensed images fill everything to cream.
     float texture = 0.12 + 0.95 * band + 0.35 * band2;
 
-    float radial = pow(rIn / rd, 2.2);                     // emissivity falls off outward
-    // beamCap: the interior ramps this down (2.2 → ~1.15). Rays winding near the
-    // photon sphere cross the disc dozens of times, EACH at maximum beaming —
-    // uncapped, the magnified interior view accumulates luminance in the
-    // hundreds and floods flat white; no downstream tonemap can save that.
-    float dopC = clamp(dop, 0.25, beamCap);
+    float radial = pow(rIn / rd, 1.7);                     // emissivity falls off outward (1.7: the outer sheet stays visible — 2.2 deleted everything past ~8 rs)
+    // Beam cap: rays winding near the photon sphere cross the disc dozens of
+    // times, EACH at maximum beaming — uncapped, stacked crossings accumulate
+    // luminance in the hundreds and flood flat white.
+    float dopC = clamp(dop, 0.25, 2.2);
     float beam = pow(dopC, 3.0);                           // beaming: white earns the centre only
     float3 shifted = col;
     shifted = mix(shifted * float3(1.0, 0.42, 0.22), shifted, saturate(dopC));               // receding limb reddens + dims
@@ -137,7 +123,7 @@ static float4 bh_disc(float3 xp, float3 n, float rd, float rIn, float rOut,
     // near-black with SATURATED red-orange fire in thin streams — white almost
     // nowhere. Gain down (1.6 → 1.05) and saturation up (1.3 → 1.45): the fire
     // stays fire, and the photon ring reads as the thin bright line it should be.
-    float3 rgb = shifted * (radial * texture * beam) * grav * 1.05 * (1.0 + boost * 2.0);
+    float3 rgb = shifted * (radial * texture * beam) * grav * 1.05;
     float dlum = dot(rgb, float3(0.30, 0.55, 0.15));
     rgb = max(float3(0.0), mix(float3(dlum), rgb, 1.45));  // saturation push toward the fire
 
@@ -148,66 +134,16 @@ static float4 bh_disc(float3 xp, float3 n, float rd, float rIn, float rOut,
     // a hard rOut cutoff — a bounded, band-noise-textured slab whose elliptical
     // outline (and its lensed far-side domes) read as dark "bubbles" flanking
     // the shadow. Fire must thin into streams and then into nothing.
-    float outerFade = 1.0 - smoothstep(0.45, 0.92, t);
-    float alpha = saturate((0.10 + 0.90 * smoothstep(0.40, 1.15, texture)) * (1.0 - t * 0.92) * 1.4)
+    float outerFade = 1.0 - smoothstep(0.55, 0.97, t);
+    float alpha = saturate((0.10 + 0.90 * smoothstep(0.40, 1.15, texture)) * (1.0 - t * 0.85) * 1.4)
                 * outerFade;
     return float4(rgb * outerFade, alpha);
-}
-
-// NASA-fire tonemap for the disc's accumulated HDR light (SVS 14585): brightness
-// climbs a blackbody-style ramp — black → deep red → vivid orange → amber — and
-// earns WHITE only at photon-ring luminance. The old channel-wise knee scaled
-// R,G,B together, so stacked lensed crossings clipped into pale cream sheets;
-// mapping the luminance through a fire ramp keeps every bright pixel saturated.
-// A trace of the pixel's own hue survives (Doppler limb asymmetry stays visible).
-static float3 bh_fireTone(float3 rgb) {
-    float lum = dot(rgb, float3(0.30, 0.55, 0.15));
-    if (lum < 1e-5) return rgb;
-    float L = lum / (4.0 + lum);                           // filmic-ish; white needs lum ≳ 23
-    float3 ramp;
-    if (L < 0.35)      ramp = mix(float3(0.0),               float3(0.62, 0.07, 0.01), L / 0.35);
-    else if (L < 0.62) ramp = mix(float3(0.62, 0.07, 0.01),  float3(1.00, 0.42, 0.05), (L - 0.35) / 0.27);
-    else if (L < 0.85) ramp = mix(float3(1.00, 0.42, 0.05),  float3(1.02, 0.62, 0.22), (L - 0.62) / 0.23);
-    else               ramp = mix(float3(1.02, 0.62, 0.22),  float3(1.28, 1.20, 1.08), saturate((L - 0.85) / 0.15));
-    float3 hue = saturate(rgb / max(lum, 1e-5));
-    return ramp * mix(float3(1.0), hue, 0.30);
-}
-
-// Post effects shared by every pixel (dive staging). Disc light arrives already
-// fire-tonemapped (LDR); the headlight boost here applies to the BACKGROUND only
-// — the disc's own boost is folded in before its tonemap (bh_fireTone input).
-static float4 bh_post(float3 col, float a, float3 screenDir, float3 fwd, constant LensUniforms& u) {
-    if (u.redshiftG > 0.001) {                             // the interior death, centre-first
-        // Hamilton (JILA): deep inside, the fore/aft view redshifts and dies
-        // FIRST while the sideways sky stays bright and blueshifted — the outside
-        // universe's last light is a ring around your waist, not a uniform fade.
-        // Screen mapping: the frame centre (the illusory horizon ahead) embers
-        // and dies early; the tunnel walls at the frame edge survive longest,
-        // slightly cooled. Contrast-deepening ember (pow > 1 on luminance): dim
-        // light goes to black, bright filaments stay saturated — a flat linear
-        // blend turned the whole interior into one copper wall.
-        float axial = saturate(dot(screenDir, fwd));
-        axial *= axial;                                    // 1 at centre → 0 at the edge
-        float rG = u.redshiftG * mix(0.55, 1.0, axial);
-        float lum = dot(col, float3(0.30, 0.55, 0.15));
-        float3 ember = pow(max(lum, 0.0), 1.6) * float3(1.15, 0.44, 0.18);
-        col = mix(col, ember, rG * 0.8);
-        col *= 1.0 - rG * rG * 0.96;
-        col = mix(col, col * float3(0.88, 0.96, 1.14), u.redshiftG * (1.0 - axial) * 0.5);
-    }
-    if (u.flash > 0.001) {                                 // the final white-out
-        // Warm-capped: full-frame pure white out of near-black physically hurts
-        // on OLED (and is the photosensitivity concern) — the first light after
-        // the last light reads warm.
-        col = mix(col, float3(1.22, 1.02, 0.80), u.flash);
-        a = max(a, u.flash);
-    }
-    return float4(col, a);
 }
 
 fragment float4 lens_fragment(LensVSOut in [[stage_in]],
                               texture2d<float> sceneTex [[texture(0)]],
                               texture2d<float> skyTex [[texture(1)]],
+                              depth2d<float> sceneDepthTex [[texture(2)]],
                               constant LensUniforms& u [[buffer(0)]]) {
     constexpr sampler smp(address::clamp_to_edge, filter::linear);
 
@@ -219,36 +155,7 @@ fragment float4 lens_fragment(LensVSOut in [[stage_in]],
     float3 hp    = float3(u.hx, u.hy, u.hz);               // hole, camera at origin (pc)
 
     float2 ndc = float2(in.uv.x * 2.0 - 1.0, 1.0 - in.uv.y * 2.0);
-
-    // Tidal spaghettification: stretch the image radially along the fall axis.
-    // Capped at ~2.3× — the old 6× magnified the reduced-res target into giant
-    // posterized smears (the "broken" interior frames).
-    if (u.spaghetti > 0.001) {
-        float4 hc = u.viewProj * float4(hp, 1.0);
-        float2 hndc = hc.w > 0.001 ? hc.xy / hc.w : float2(0.0);
-        float2 dv = ndc - hndc;
-        float stretch = 1.0 + u.spaghetti * 1.3 * exp(-length(dv) * 1.6);
-        ndc = hndc + dv / stretch;
-    }
-
-    float3 screenDir = normalize(fwd + right * (ndc.x * u.tanHalfW) + up * (ndc.y * u.tanHalfH));
-    float3 dir = screenDir;
-    // Relativistic aberration, INVERSE map: negative β crowds the sky into view
-    // (approach compression); positive warp MAGNIFIES the forward view. The
-    // aperture rides the warp positive through the interior: the view plunges
-    // INTO the darkness — the black centre swallowing outward while the disc and
-    // lensed sky stream past the frame edges. (Compression toward the centre
-    // reads as receding — that's the failed "collapse dome" — magnification
-    // toward the axis is the falling-in cue.)
-    // β term kept to a TRACE (was -0.6): once real stars were restored to the
-    // dive (2026-08-04), full physical compression made them visibly drift
-    // toward the centre through the approach — the receding cue again, and the
-    // whole fall read as flying AWAY. The into-cues that must win are geometric:
-    // the shadow looming as r drops and the lensing pushing stars outward into
-    // the Einstein ring — both already in the render, both fighting the old
-    // compression.
-    float warp = clamp(-0.15 * u.beta + 1.45 * u.aperture, -0.95, 0.9);
-    if (fabs(warp) > 0.001) dir = bh_aberrate(dir, fwd, warp);
+    float3 dir = normalize(fwd + right * (ndc.x * u.tanHalfW) + up * (ndc.y * u.tanHalfH));
 
     float dAlong = dot(hp, dir);
     float3 cvec = dir * max(dAlong, 0.0) - hp;             // hole → closest approach
@@ -285,8 +192,7 @@ fragment float4 lens_fragment(LensVSOut in [[stage_in]],
                 float3 xp = p - v * dt * (1.0 - f);
                 float rd = length(xp);
                 if (rd > rIn && rd < rOut) {
-                    float beamCap = mix(2.2, 1.15, saturate(u.aperture * 1.3));
-                    float4 d = bh_disc(xp, n, rd, rIn, rOut, u.time, normalize(v), u.discBoost, beamCap);
+                    float4 d = bh_disc(xp, n, rd, rIn, rOut, u.time, normalize(v));
                     acc += d.rgb * d.a * trans;
                     trans *= 1.0 - d.a;
                     if (trans < 0.02) break;                // effectively opaque
@@ -301,11 +207,17 @@ fragment float4 lens_fragment(LensVSOut in [[stage_in]],
         float alpha = 2.0 * u.rs / max(perp, u.rs * 3.0);
         outDir = normalize(dir - (cvec / max(perp, 1e-5)) * alpha);
     }
+    // Distance fade (device review 2026-08-10): from across the galaxy the
+    // influence disc subtends well under a degree, yet the warp rippled at
+    // full strength — bending content thousands of ly in FRONT of the hole.
+    // Physically an Einstein ring at that distance is near sub-pixel; ease the
+    // deflection out as the hole recedes. Captured rays keep their tiny true
+    // shadow silhouette.
+    if (u.strength < 0.999) outDir = normalize(mix(dir, outDir, max(u.strength, 0.0)));
     float bendRaw = 1.0 - dot(outDir, dir);               // how far the hole moved this ray
 
     // Background: the rendered galaxy sampled where the bent ray points, the baked
-    // equirect sky when that leaves the frame (or during a dive, when the whole
-    // aberrated sky must come from the bake).
+    // equirect sky when that leaves the frame.
     float3 bg = float3(0.0);
     float bgA = 0.0;
     if (!captured && trans > 0.02) {
@@ -332,30 +244,18 @@ fragment float4 lens_fragment(LensVSOut in [[stage_in]],
         // — the bake is where near-hole content is culled, so only it can show
         // the clean distant sky the lens should bend.
         float bent = saturate(bendRaw * 400.0);
-        float bakeW = max(max((1.0 - screenW) * bent, saturate(bendRaw * 25.0)), u.bakeMix);
+        float bakeW = max((1.0 - screenW) * bent, saturate(bendRaw * 25.0));
         if (bakeW > 0.001) {
             // Wrap longitude so rays crossing the panorama's ±π seam stay continuous.
-            // Mip-filtered: auto derivatives pick the right level whether the warp
-            // magnifies (interior tunnel) or minifies (approach compression) the
-            // panorama — without mips the star sprites alias into blue confetti
-            // sheets mid-dive. The aperture bias adds a deliberate extra blur as
-            // the interior magnification grows.
             constexpr sampler wrapSmp(s_address::repeat, t_address::clamp_to_edge,
                                       filter::linear, mip_filter::linear);
             float2 buv = bh_equirect(outDir);
             // ANALYTIC mip level — never derivative-based: in the march zone
             // neighbouring rays diverge chaotically, so auto-lod flips per pixel
-            // and sprays coloured grain. Two smooth terms instead: the dive state
-            // (magnified stars soften into round dots) and the bend amount
-            // (strongly-lensed sectors compress many images — blur matches that).
-            float diveAmt = saturate(max(u.beta * 1.8, u.aperture * 2.0));
-            float dlod = saturate(max(u.aperture * 1.4, (u.beta - 0.15) * 1.3)) * 2.2;
-            // Bend-blur is mostly a DIVE need (violent warp rates). Parked, heavy
-            // blur melts compact bright content (the nuclear star swarm) into
-            // smooth cream blobs beside the shadow — keep it granular so the
-            // lensed cluster reads as warped stars, not a blob.
-            float blod = saturate((1.0 - dot(outDir, dir)) * 3.0) * 2.5 * mix(0.4, 1.0, diveAmt);
-            float lodF = clamp(dlod + blod, 0.0, 6.0);
+            // and sprays coloured grain. Strongly-lensed sectors compress many
+            // images — a gentle blur matches that, kept granular so the lensed
+            // cluster reads as warped stars, not a blob.
+            float lodF = clamp(saturate(bendRaw * 3.0), 0.0, 6.0);
             // Tangentially SHEARED base sample: a lensed image is stretched into
             // an arc around the hole, and without the stretch the (physically
             // real) double image of the galaxy's radiant core reads as two round
@@ -376,18 +276,11 @@ fragment float4 lens_fragment(LensVSOut in [[stage_in]],
                     b = skyTex.sample(wrapSmp, buv, level(lodF));
                 }
             }
-            // Council fix (2026-08-04): the dive's hard bake dim deleted the
-            // UNIVERSE along with the glow — and falling is only legible as the
-            // loss of a referent. Unsharp-split the bake: a coarse mip is the
-            // warm glow (still dies with speed, below); fine-minus-coarse is the
-            // POINT STARS, re-added after the dims so the sky stays populated —
-            // streaming past on approach, surviving longest at the frame edge
-            // inside (Hamilton's sideways sky), guttering out before the flash.
-            // Strongly-bent rays get the star treatment even PARKED: without it
-            // the lensed region sampled only the blurred bake and rendered as a
-            // flat dark disc around the hole ("a bubble") — lensing should show
-            // the sky's own stars, warped.
-            float starGate = max(diveAmt, saturate(bendRaw * 40.0));
+            // Strongly-bent rays get an unsharp star split: sampling only the
+            // blurred bake rendered the lensed region as a flat dark disc around
+            // the hole ("a bubble") — lensing should show the sky's own stars,
+            // warped. Coarse mip = the glow; fine-minus-coarse = the POINT STARS.
+            float starGate = saturate(bendRaw * 40.0);
             float3 bStars = float3(0.0);
             if (starGate > 0.001) {
                 float lodStar = clamp(max(lodF * 0.6, 1.0), 1.0, 2.5);   // soft dots, never confetti
@@ -415,9 +308,10 @@ fragment float4 lens_fragment(LensVSOut in [[stage_in]],
                 // point stars sit on a DARK neighbourhood (coarse ≈ 0); suppress
                 // the detail wherever the neighbourhood itself is bright, and cap
                 // the per-pixel luminance for whatever slips through.
-                bStars *= saturate(1.0 - dot(coarse, float3(0.30, 0.55, 0.15)) * 5.0);
+                float suppress = saturate(1.0 - dot(coarse, float3(0.30, 0.55, 0.15)) * 5.0);
+                bStars *= suppress;
                 float slum0 = dot(bStars, float3(0.30, 0.55, 0.15));
-                bStars *= min(1.0, 0.30 / max(slum0, 1e-4));
+                bStars *= min(1.0, 0.45 / max(slum0, 1e-4));
             }
             // The bake resolves individual stars but under-samples the soft bulge
             // wash (its sprites shrink to true angular size); add the nucleus glow
@@ -425,105 +319,36 @@ fragment float4 lens_fragment(LensVSOut in [[stage_in]],
             // bent rays blend seamlessly with the on-screen haze.
             float3 n = normalize(float3(u.dnx, u.dny, u.dnz));
             float planeDist = dot(outDir, n);
-            // The Milky Way as a THIN, dusty, textured band (NASA SVS 14585): the
-            // luminous actor that lensing bends into arcs and rings around the
-            // shadow — not a warm fog. Persists through the plunge (it's the show);
-            // only a faint wide haze fades with speed and proximity.
-            // Thin + dim (NASA: the band is a dusty grey-white ribbon on BLACK sky,
-            // not a cream flood — at 0.32 the wash filled whole dive frames).
+            // The Milky Way as a THIN, dusty, textured band: kept to a faint
+            // trace — the real baked Milky Way carries the look; at full weight
+            // this procedural great-circle ribbon drew a hard seam-like line
+            // across the whole lens region.
             float bandProfile = exp(-planeDist * planeDist * 55.0);
             float bandTex = 0.55 + 0.45 * bh_noise(float2(atan2(outDir.y, outDir.x) * 6.0,
                                                           planeDist * 14.0));
-            // Dive-weighted: parked, this procedural great-circle ribbon drew a
-            // hard seam-like line across the whole lens region — the real baked
-            // Milky Way carries the parked look; the ribbon is the dive's.
-            b.rgb += float3(0.66, 0.58, 0.48)
-                   * (0.12 * bandProfile * bandTex * (0.2 + 0.8 * saturate(u.beta * 1.6)));
+            b.rgb += float3(0.66, 0.58, 0.48) * (0.024 * bandProfile * bandTex);
             float haze = exp(-planeDist * planeDist * 5.0) * 0.05
-                       * (1.0 - 0.8 * saturate(u.beta / 0.7))
                        * saturate((length(hp) / u.rs - 5.0) / 15.0);
             b.rgb += float3(1.0, 0.82, 0.55) * haze;
-            // Dive tone knee on the bake: the map's warm nucleus glow lenses into
-            // big cream sheets mid-plunge (NASA's sky is a star band on black).
-            // Compress the bake's highlights as speed builds; parked views keep
-            // the map's own warm look untouched.
-            float bknee = saturate(u.beta * 1.8);
-            if (bknee > 0.001) {
-                float blum = dot(b.rgb, float3(0.30, 0.55, 0.15));
-                b.rgb = mix(b.rgb, b.rgb / (1.0 + 1.4 * blum), bknee);
-                // NASA's sky is near-BLACK with a thin star ribbon: the knee alone
-                // left the magnified bulge glow as pale sheets — dim the whole bake
-                // hard as speed builds (parked views untouched, bknee = 0).
-                b.rgb *= 1.0 - 0.72 * bknee;
-            }
             if (starGate > 0.001) {
-                // The surviving sky. Parked: the lensed field shows its stars.
-                // Approach: stars everywhere, streaming.
-                // Interior: survival migrates to the frame edge (the sideways sky
-                // outlives fore/aft), the dots redden as they die, and the whole
-                // population gutters out across r ~0.5 → 0.2 so the LAST star
-                // dies just before the flash — its extinction is the countdown.
-                // Survival is SCREEN-space: dot(screenDir, fwd) only spans
-                // ~0.82–1.0 across a phone FOV, which crushed every star to ~0.
-                // The NDC radius is the honest "how far from the death at the
-                // centre" measure — edges keep their stars, the centre loses
-                // them first, and everything gutters out together via `life`.
-                float edge = saturate(length(ndc));
-                float inside = saturate(u.aperture * 1.35);
-                float surv = mix(1.0, clamp(edge, 0.12, 1.0), inside);
-                float life = 1.0 - smoothstep(0.60, 0.93, u.aperture);
+                // The lensed field shows its stars — a gentle lift only: the
+                // camera-centred bake already carries the real sky, and a strong
+                // gain turned dense cluster regions into cream blobs.
                 float slum = dot(bStars, float3(0.30, 0.55, 0.15));
-                float3 starCol = mix(bStars, slum * float3(1.0, 0.45, 0.22), inside * 0.7);
-                // Parked, the camera-centred bake already carries the real sky —
-                // the split only needs a gentle lift (2.4× there turned dense
-                // cluster regions into cream blobs); the dive keeps the full
-                // gain, where the dimmed sky needs the stars pulled back out.
-                float gain = mix(1.15, 2.4 + 0.8 * inside, diveAmt);
-                b.rgb += starCol * gain * surv * life * starGate;
-                b.a = max(b.a, saturate(slum * 1.5) * surv * life * starGate * 0.6);
+                b.rgb += bStars * 1.15 * starGate;
+                b.a = max(b.a, saturate(slum * 1.5) * starGate * 0.6);
             }
             // Magnification glow, kept SUBTLE: brightening smooth fog paints
             // glossy dome rims (bulging-object read) — lensing only reads on
-            // structure. Fades out as the dive builds.
-            b.rgb *= 1.0 + 0.2 * saturate(bendRaw * 20.0) * (1.0 - saturate(u.beta * 1.8));
+            // structure.
+            b.rgb *= 1.0 + 0.2 * saturate(bendRaw * 20.0);
             b.a = max(b.a, bandProfile * 0.5);
             bg = mix(bg, b.rgb, bakeW);
             bgA = mix(bgA, b.a, bakeW);
         }
-        // Surviving outside light dims gently as the plunge deepens (the tunnel's
-        // magnification already thins it; the redshift ramp does the killing).
-        // Chroma washes slightly warm at high warp so magnified equirect texels
-        // can't rainbow-band.
-        if (u.aperture > 0.001) {
-            float lum = dot(bg, float3(0.30, 0.55, 0.15));
-            // Mild warm wash only — the mip-filtered bake no longer rainbow-bands,
-            // and a strong wash flattened the whole interior into one copper tone.
-            bg = mix(bg, lum * float3(1.0, 0.93, 0.80), saturate(u.aperture * u.aperture * 0.3));
-            bg *= 1.0 - 0.55 * u.aperture;
-            bgA *= 1.0 - 0.4 * u.aperture;
-        }
     }
 
-    // Doppler headlight: the forward boost is folded into the disc's HDR light
-    // BEFORE its fire tonemap (so beaming brightens the fire along the ramp
-    // instead of re-clipping tonemapped values to cream); the background gets it
-    // in LDR with its own soft knee. The disc skips the blue tint — NASA's fire
-    // stays warm at every speed.
-    float ahead = saturate(dot(dir, fwd));
-    float head = u.beta > 0.001 ? 1.0 + u.beta * 1.1 * ahead * ahead * ahead : 1.0;
-    // The disc takes the headlight at half strength — mid-plunge every warped
-    // ray is near-forward, and the full boost just doubled the stacked images.
-    // PARKED, the disc keeps its raw HDR light (clipping at the target = the
-    // approved crisp orange disc + white-hot ring identity); the NASA-fire
-    // tonemap takes over as the dive builds speed — that's when stacked lensed
-    // images would otherwise flood the frame cream.
-    float3 fire = bh_fireTone(acc * (1.0 + (head - 1.0) * 0.55));
-    float3 discCol = mix(acc, fire, saturate(u.beta * 1.6));
-    float3 bgCol = bg * head * mix(float3(1.0), float3(0.86, 0.94, 1.18), u.beta * ahead * 0.6);
-    float bglum = dot(bgCol, float3(0.30, 0.55, 0.15));
-    bgCol = mix(bgCol, bgCol / (1.0 + 0.6 * bglum), saturate(u.beta * 1.5));
-
-    float3 col = discCol + bgCol * trans;
+    float3 col = acc + bg * trans;
     // The shadow must be a solid black ball (not the UI gradient leaking through);
     // the disc adds its own coverage on top of whatever background survives.
     float a = captured ? 1.0 : max(bgA * trans, saturate(1.0 - trans));
@@ -533,8 +358,7 @@ fragment float4 lens_fragment(LensVSOut in [[stage_in]],
     // too — deflecting that light punched a dark "bubble" in the fog around the
     // whole influence region. Re-composite a blurred sample of this pixel's
     // ORIGINAL screen position over content-replaced rays (incl. a faint wash
-    // over the shadow — the fog is in front of it). Fades with β so the dive
-    // keeps its NASA-dark sky.
+    // over the shadow — the fog is in front of it).
     {
         constexpr sampler veilSmp(address::clamp_to_edge, filter::linear, mip_filter::linear);
         // The shadow keeps only a TRACE of fog (0.22): at half strength it read
@@ -543,7 +367,7 @@ fragment float4 lens_fragment(LensVSOut in [[stage_in]],
         // bake already carries the real foreground fog, and stacking the veil on
         // top double-counts it.
         float veilGate = max(saturate(bendRaw * 30.0) * 0.25, captured ? 0.22 : 0.0);
-        float veilW = 0.5 * veilGate * (1.0 - saturate(u.beta * 1.5));
+        float veilW = 0.5 * veilGate;
         if (veilW > 0.001) {
             float3 veil = sceneTex.sample(veilSmp, in.uv, level(4.0)).rgb;
             col += veil * veilW;
@@ -551,28 +375,24 @@ fragment float4 lens_fragment(LensVSOut in [[stage_in]],
         }
     }
 
-    // bh_post gets the SCREEN ray (pre-aberration): the interior's centre-vs-edge
-    // weighting is compositional — post-warp directions all crowd toward fwd.
-    float4 res = bh_post(col, a, screenDir, fwd, u);
-    // Ember floor (council, 2026-08-04): where the ray carries fire, the interior
-    // never drops below ~3% luminance — on a real phone true black reads as a
-    // frozen app, not drama. Only the flash extinguishes the embers.
-    if (u.aperture > 0.2) {
-        float discSig = saturate(1.0 - trans);
-        res.rgb = max(res.rgb, float3(0.034, 0.011, 0.004) * (discSig * (1.0 - u.flash)));
-        res.a = max(res.a, 0.9 * discSig);
+    float4 res = float4(col, a);
+    // FOREGROUND GUARD (device review 2026-08-10): the lens treats every scene
+    // pixel as living behind the hole, so a nebula thousands of light-years in
+    // FRONT of it got bent and hole-punched (California Nebula over Sgr A*).
+    // The occluder pass writes real depth for opaque landmark cores — where the
+    // scene is genuinely nearer than the hole, the un-warped scene pixel wins
+    // the frame back. (Log-depth is monotonic: smaller = nearer.)
+    if (u.holeDepth > 0.0) {
+        float sceneD = sceneDepthTex.sample(smp, in.uv);
+        float fg = 1.0 - smoothstep(u.holeDepth * 0.986, u.holeDepth, sceneD);
+        if (fg > 0.001) {
+            float4 orig = sceneTex.sample(smp, in.uv);
+            res.rgb = mix(res.rgb, orig.rgb, fg);
+            res.a = mix(res.a, orig.a, fg);
+        }
     }
-    // Horizon-crossing event: the photon ring (impact parameter b ≈ 2.6 rs)
-    // flares white-hot as you pass r = 1 and its afterglow decays inside — the
-    // headline beat gets an image, not just a HUD caption.
-    if (u.crossing > 0.001 && dAlong > 0.0) {
-        float ringNess = exp(-pow((perp / u.rs - 2.6) / 0.38, 2.0));
-        res.rgb += float3(1.30, 1.15, 0.95) * (ringNess * u.crossing * 0.7);
-        res.rgb *= 1.0 + 0.15 * u.crossing;
-        res.a = max(res.a, saturate(ringNess * u.crossing));
-    }
-    // Blue-noise-ish dither: the interior's long smooth ramps posterize on the
-    // 8-bit reduced-res target without it.
+    // Blue-noise-ish dither: long smooth ramps posterize on the 8-bit
+    // reduced-res target without it.
     res.rgb += (bh_hash(in.uv * float2(u.viewW, u.viewH) + fract(u.time * 0.37) * 61.0) - 0.5)
                * (2.0 / 255.0);
     return res;
@@ -667,8 +487,9 @@ fragment float4 bake_fragment(BakeVSOut in [[stage_in]]) {
 }
 
 // Upscale blit: the lens pass renders at reduced resolution into an internal
-// texture (a native-res geodesic march per pixel is unaffordable mid-dive);
-// this stretches it onto the full drawable. Deliberately dumb — bilinear soft.
+// texture (a native-res geodesic march per pixel is unaffordable when the
+// influence region fills the frame); this stretches it onto the full drawable.
+// Deliberately dumb — bilinear soft.
 fragment float4 blit_fragment(LensVSOut in [[stage_in]],
                               texture2d<float> src [[texture(0)]]) {
     constexpr sampler smp(address::clamp_to_edge, filter::linear);

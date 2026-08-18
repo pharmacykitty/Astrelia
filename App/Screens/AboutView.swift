@@ -31,7 +31,7 @@ struct AboutView: View {
             Text("Sources & Credits")
                 .font(.system(.largeTitle, design: .serif).weight(.bold))
                 .foregroundStyle(.white).multilineTextAlignment(.center)
-            Text("Every position, fact, and figure in Astrolabe comes from open astronomical data and published algorithms. The people and projects behind them:")
+            Text("Every position, fact, and figure in Stellaria comes from open astronomical data and published algorithms. The people and projects behind them:")
                 .font(.subheadline).foregroundStyle(.white.opacity(0.65))
                 .multilineTextAlignment(.center)
         }
@@ -103,7 +103,7 @@ struct AboutView: View {
 
     private var footer: some View {
         VStack(spacing: 6) {
-            Text("Astrolabe")
+            Text("Stellaria")
                 .font(.system(.headline, design: .serif)).foregroundStyle(.white.opacity(0.8))
             Text("Built with respect for the open astronomy community.")
                 .font(.caption).foregroundStyle(.white.opacity(0.45))
@@ -161,7 +161,7 @@ enum SourceCatalog {
                         license: "Reference",
                         url: "https://simbad.cds.unistra.fr"),
             SourceEntry(name: "Black-hole visualization — NASA SVS",
-                        detail: "The Sagittarius A* gravitational-lensing model and the dive sequence (shadow, photon ring, Doppler-beamed disc, aberration, the staged plunge and its timings) are a real-time Schwarzschild approximation inspired by NASA's \"Beyond the Brink\" supercomputer visualization (Goddard SVS, J. Schnittman). Sgr A*'s mass, horizon size, and distance are real; the rendering is physically motivated but stylized.",
+                        detail: "The Sagittarius A* gravitational-lensing model (shadow, photon ring, Doppler-beamed disc) is a real-time Schwarzschild approximation inspired by NASA's \"Beyond the Brink\" supercomputer visualization (Goddard SVS, J. Schnittman). Sgr A*'s mass, horizon size, and distance are real; the rendering is physically motivated but stylized.",
                         license: "Inspiration / reference",
                         url: "https://svs.gsfc.nasa.gov/14585"),
         ]),

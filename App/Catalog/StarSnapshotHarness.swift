@@ -4,7 +4,7 @@ import CelestialCore
 /// Debug-only: renders the star-detail comparison widgets (HR diagram, size-vs-Sun
 /// silhouette, relatable facts, life story) for a sample star, so they can be
 /// screenshotted from the simulator where the catalog UI can't be scripted. Reached
-/// via the `-snapshotStar` launch arg (see `AstrolabeApp`).
+/// via the `-snapshotStar` launch arg (see `StellariaApp`).
 struct StarSnapshotHarness: View {
     @State private var store = StarCatalogStore()
     @State private var population: [HRPoint] = []

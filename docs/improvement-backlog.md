@@ -106,8 +106,8 @@ already exists.
   lock in the visuals and enable the `performAccessibilityAudit()` path (see a11y spec).
 - **Math package is well tested** (`CelestialCore` `swift test` green in `../AstroPackages`,
   validated against Meeus / Horizons). Gap is purely at the **UI/integration** layer.
-- **Reduce Motion** is honored in only one file (`SystemView`) — the dive cinematic and galaxy
-  fly-tos ignore it (tracked in the a11y spec, but it's also a correctness/polish issue).
+- **Reduce Motion** is honored in only one file (`SystemView`) — the galaxy fly-tos ignore
+  it (tracked in the a11y spec, but it's also a correctness/polish issue).
 
 ---
 

@@ -124,7 +124,7 @@ struct SettingsView: View {
         } header: {
             Text("Motion")
         } footer: {
-            Text("Softens the galaxy dive and sky animations when the system Reduce Motion setting is on.")
+            Text("Softens the sky and map animations when the system Reduce Motion setting is on.")
         }
         .listRowBackground(Color.white.opacity(0.05))
     }
@@ -137,7 +137,7 @@ struct SettingsView: View {
                     Button("Reset", role: .destructive) { prefs.reset() }
                 }
         } footer: {
-            Text("Astrolabe \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")")
+            Text("Stellaria \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")")
                 .frame(maxWidth: .infinity, alignment: .center)
         }
         .listRowBackground(Color.white.opacity(0.05))

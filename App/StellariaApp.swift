@@ -2,7 +2,7 @@ import SwiftUI
 import CelestialCore
 
 @main
-struct AstrolabeApp: App {
+struct StellariaApp: App {
     var body: some Scene {
         WindowGroup {
             // Debug-only snapshot routes so deep screens can be captured directly
@@ -11,8 +11,8 @@ struct AstrolabeApp: App {
                 NavigationStack { StarSnapshotHarness() }
                     .preferredColorScheme(.dark)
             } else if ProcessInfo.processInfo.arguments.contains("-galaxyBH") {
-                // Debug: open the Galaxy Map at Sgr A* (add `-dive` to free-fly straight in).
-                GalaxyBlackHoleHarness(dive: ProcessInfo.processInfo.arguments.contains("-dive"))
+                // Debug: open the Galaxy Map at Sgr A*.
+                GalaxyBlackHoleHarness()
             } else if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-galaxyLandmark") {
                 // Debug: open the Galaxy Map flown to a named landmark (default: Orion Nebula).
                 let args = ProcessInfo.processInfo.arguments
@@ -126,12 +126,11 @@ private struct FiguresSnapshotHarness: View {
 
 /// Debug host for `-galaxyBH`: the Galaxy Map focused on Sagittarius A*.
 private struct GalaxyBlackHoleHarness: View {
-    let dive: Bool
     @State private var store = StarCatalogStore()
     @State private var exo = ExoplanetStore()
 
     var body: some View {
-        GalaxyMapView(store: store, exo: exo, focus: .blackHole(dive: dive))
+        GalaxyMapView(store: store, exo: exo, focus: .blackHole)
             .task { store.loadIfNeeded(); exo.loadIfNeeded() }
             .preferredColorScheme(.dark)
     }

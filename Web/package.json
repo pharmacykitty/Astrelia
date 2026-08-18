@@ -1,8 +1,8 @@
 {
-  "name": "astrolabe-web",
+  "name": "stellaria-web",
   "version": "0.0.0",
   "private": true,
-  "description": "Web workspace + Playwright headless tests for Astrolabe",
+  "description": "Web workspace + Playwright headless tests for Stellaria",
   "type": "module",
   "scripts": {
     "test": "playwright test",

@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Debug-only: renders `PlanetDetailView` for a sample Solar System world so the
 /// planet detail sheet can be screenshotted from the simulator. Reached via the
-/// `-snapshotPlanet` launch arg (see `AstrolabeApp`). Defaults to Earth; pass a
+/// `-snapshotPlanet` launch arg (see `StellariaApp`). Defaults to Earth; pass a
 /// planet name as the next argument to pick another (e.g. "Jupiter").
 struct PlanetSnapshotHarness: View {
     var planetName: String = "Earth"
