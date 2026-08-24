@@ -41,6 +41,8 @@ targets:
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         INFOPLIST_KEY_UIStatusBarStyle: UIStatusBarStyleLightContent
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait
+        # iPad multitasking requires all four orientations; App Store validation rejects the bundle otherwise.
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
         INFOPLIST_KEY_NSLocationWhenInUseUsageDescription: "Astrelia uses your location to compute the real positions of the Sun, Moon, and stars in your sky."
         INFOPLIST_KEY_NSMotionUsageDescription: "Astrelia uses device motion to know where your phone is pointed at the sky."
         INFOPLIST_KEY_NSCameraUsageDescription: "Astrelia uses the camera to overlay the sky on your real surroundings in AR mode."
