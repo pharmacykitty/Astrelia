@@ -7,7 +7,7 @@
 
 ---
 
-## Why this fits Astrolabe
+## Why this fits Astrelia
 
 The app already computes, off the main actor, everything a glanceable surface wants:
 - `CelestialCore.VisibleSky.status(at:date:)` → planets up/down, sun day/night.
@@ -24,12 +24,12 @@ link cleanly into a widget target).
 
 ## New target
 
-`AstrolabeWidgets` (WidgetKit extension) added to `project.yml`:
+`AstreliaWidgets` (WidgetKit extension) added to `project.yml`:
 - Depends on `CelestialCore` and `Astrology` (the pure packages).
 - Shares the bundled catalogs it needs (Moon/planets need no catalog; star-dependent widgets
   would need the resource — prefer widgets that **don't** need the 560 KB star CSV to keep the
   extension light).
-- **App Group** (`group.pink.ely.astrolabe`) so the widget can read the user's
+- **App Group** (`group.pink.ely.astrelia`) so the widget can read the user's
   **home location** and **default chart id** written by `AppPreferences`
   (see `docs/preferences-spec.md` — store shared prefs in the group's `UserDefaults`).
   SwiftData `SavedChart` access from the widget: either expose the model container to the app
@@ -74,8 +74,8 @@ Add an `AppIntents` provider (in the app, optionally surfaced to the widget for 
   zero setup, and expose **interactive widget buttons** (e.g. a "refresh"/"next" button) via
   `Button(intent:)` on iOS 17+.
 
-Deep-linking: define a small `AstrolabeRoute` URL scheme/`onOpenURL` handler in
-`AstrolabeApp`/`ContentView` so widget taps and intents land on the right screen
+Deep-linking: define a small `AstreliaRoute` URL scheme/`onOpenURL` handler in
+`AstreliaApp`/`ContentView` so widget taps and intents land on the right screen
 (today the app is a single `ContentView` + full-screen menu cover; add a routing `@State` that
 the menu/cover can be driven from).
 

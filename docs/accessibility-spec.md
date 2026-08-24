@@ -1,7 +1,7 @@
 # Accessibility — Spec (deferred implementation)
 
 > Status: **spec only — to be implemented later** (per owner). Drafted 2026-06-28.
-> Goal: make Astrolabe usable with VoiceOver, Dynamic Type, Reduce Motion, and high
+> Goal: make Astrelia usable with VoiceOver, Dynamic Type, Reduce Motion, and high
 > contrast, without diluting the "luminous instrument" look. The hard part is that the
 > app's signature content is drawn in `Canvas`/Metal, which is invisible to assistive
 > tech by default.

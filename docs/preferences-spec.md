@@ -70,7 +70,7 @@ final class AppPreferences {
 ```
 
 - Inject once at the scene root: `ContentView().environment(AppPreferences.shared)`, and in
-  `AstrolabeApp` so snapshot harnesses get a fresh instance.
+  `AstreliaApp` so snapshot harnesses get a fresh instance.
 - Views read via `@Environment(AppPreferences.self) private var prefs`.
 - Keep `SkyFilters` as the in-memory binding type, but **seed it from `prefs` on appear** and
   **write back on change** (one `onChange(of: filters)` already exists in `ContentView` — extend it to persist). Same pattern for the galaxy toggles.

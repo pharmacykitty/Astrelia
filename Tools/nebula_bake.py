@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bake a deep-sky photo into a particle dataset for Astrolabe's Galaxy Map.
+"""Bake a deep-sky photo into a particle dataset for Astrelia's Galaxy Map.
 
 The Galaxy Map renders nebulae as clouds of additive billboard sprites. This tool
 turns a real (public-domain) telescope image into the *positions and colours* of
@@ -132,7 +132,7 @@ def _preview(gas, dust, w, h, path):
 
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser(description="Bake a deep-sky photo into an Astrolabe .nbl particle set.")
+    ap = argparse.ArgumentParser(description="Bake a deep-sky photo into an Astrelia .nbl particle set.")
     ap.add_argument("src"); ap.add_argument("out")
     ap.add_argument("--gas", type=int, default=17000)
     ap.add_argument("--dust", type=int, default=2600)

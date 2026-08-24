@@ -1,8 +1,8 @@
-# Citlali
+# Astrelia
 
 > A point-at-the-sky planetarium for iOS with deep astrophysical data — built to be genuinely beautiful.
 
-**Status:** Feature-complete, heading to release. **Name decided 2026-08-18: Citlali** (Nahuatl for "star"; third naming — "Astrolabe" and bare "Stellaria" were both taken in App Store Connect, where reserved-but-unreleased names are invisible to catalog sweeps: the ASC New App dialog is the only real availability test). **ASC records exist:** Citlali (id 6802807358, bundle `pink.ely.citlali`, SKU `citlali`) and sister Selenia (id 6802806616, bundle `pink.ely.selenia`, SKU `selenia`), both en-US/iOS. The repo folder is still `~/Developer/Astrolabe` — rename deliberately. Target/bundle renamed: `Citlali` / `pink.ely.citlali`, `CitlaliApp.swift`. ⚠️ The app icon is still the astrolabe design — revisit for the new name (citlali = star; a star glyph motif fits). ⚠️ The updated Apple Developer Program License Agreement must be accepted by the Account Holder before submission.
+**Status:** Feature-complete, heading to release. **Name decided 2026-08-24: Astrelia** (fourth naming — "Astrolabe", bare "Stellaria" and "Citlali" preceded it; App Store Connect hides reserved-but-unreleased names from catalog sweeps, so the ASC New App dialog is the only real availability test). **ASC records:** the old **Citlali** record (id 6802807358, bundle `pink.ely.citlali`, SKU `citlali`) still exists — ⚠️ a bundle ID can't be edited after an ASC record is created, so **Astrelia needs a fresh ASC record** (bundle `pink.ely.astrelia`, SKU `astrelia`) and the Citlali one should be deleted/left unused. Sister **Selenia** (id 6802806616, bundle `pink.ely.selenia`, SKU `selenia`) is unaffected; both en-US/iOS. The repo folder is `~/Developer/Astrelia` (renamed 2026-08-24). Target/bundle: `Astrelia` / `pink.ely.astrelia`, `AstreliaApp.swift`. ⚠️ The app icon is still the astrolabe design — revisit for the new name (a star glyph motif fits). ⚠️ The updated Apple Developer Program License Agreement must be accepted by the Account Holder before submission.
 
 ---
 
@@ -58,7 +58,7 @@ project.yml                # XcodeGen spec — the .xcodeproj is generated, not 
 
 ### Sister repos (the 2026-07-15 split)
 The original single app carried both astronomy and a full astrology suite; it was split for focus and commercialization:
-- **`~/Developer/Astrolabe`** (this repo) — the astronomy app, **Citlali** (folder predates the 2026-08-18 naming). Depends on `CelestialCore` only.
+- **`~/Developer/Astrelia`** (this repo) — the astronomy app, **Astrelia** (folder renamed from `Astrolabe` on 2026-08-24 to match). Depends on `CelestialCore` only.
 - **`~/Developer/Ecliptica`** — the astrology app, **Selenia** (named 2026-08-18; folder predates it): charts, transits, synastry, predictive, 3D celestial sphere. Depends on `CelestialCore` + `Astrology`. It carries **duplicated copies** of `Theme.swift`, `LuminousGlyph`, `StarCatalogStore.swift`, `Constellations.swift`, `stars.bin`, and `constellation_lines.json` — port fixes across when touching those here.
 - **`~/Developer/AstroPackages`** — the shared SPM packages (`CelestialCore` + `Astrology`, siblings so Astrology's `../CelestialCore` path works). All three repos must be checked out side by side.
 
@@ -148,6 +148,6 @@ the source of truth for that work — read them before implementing, and keep th
   items (precession-gap toggle, transit-to-sky, void-of-course Moon) moved to Ecliptica's backlog.
 
 ## Open questions
-- ~~Final name (+ App Store availability check).~~ **Resolved 2026-08-18: Citlali** (ASC record created = name reserved). Still to do: trademark/domain sweep, decide whether the astrolabe icon stays, Account Holder accepts the updated license agreement.
+- ~~Final name (+ App Store availability check).~~ **Resolved 2026-08-24: Astrelia.** Still to do: create the Astrelia ASC record (a new bundle ID means a new record — reserves the name), trademark/domain sweep, decide whether the astrolabe icon stays, Account Holder accepts the updated license agreement.
 - ~~`SwiftAA` dependency or implement the math ourselves?~~ **Resolved:** rolled our own for astronomy; SwiftAA (MIT) for planet positions in `CelestialCore.Planets`.
 - AR via raw CoreMotion overlay vs. ARKit camera passthrough?

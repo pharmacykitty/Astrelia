@@ -1,6 +1,6 @@
-# Astrolabe — Web workspace
+# Astrelia — Web workspace
 
-Node/Playwright workspace for any web piece of Astrolabe and its headless tests.
+Node/Playwright workspace for any web piece of Astrelia and its headless tests.
 
 ## Setup
 

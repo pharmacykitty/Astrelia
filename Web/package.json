@@ -1,8 +1,8 @@
 {
-  "name": "citlali-web",
+  "name": "astrelia-web",
   "version": "0.0.0",
   "private": true,
-  "description": "Web workspace + Playwright headless tests for Citlali",
+  "description": "Web workspace + Playwright headless tests for Astrelia",
   "type": "module",
   "scripts": {
     "test": "playwright test",

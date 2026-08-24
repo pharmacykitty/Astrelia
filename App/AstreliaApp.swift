@@ -2,7 +2,7 @@ import SwiftUI
 import CelestialCore
 
 @main
-struct CitlaliApp: App {
+struct AstreliaApp: App {
     var body: some Scene {
         WindowGroup {
             // Debug-only snapshot routes so deep screens can be captured directly

@@ -28,7 +28,7 @@ per-feature tints). No emoji; SF Symbols + glyphs.
 
 ### Flow
 
-1. **Welcome.** Wordmark "Astrolabe" + "Chart the heavens." One line on the dual nature:
+1. **Welcome.** Wordmark "Astrelia" + "Chart the heavens." One line on the dual nature:
    *"A real planetarium and a full astrology layer — the same sky, two ways of seeing it."*
    Primary button **Continue**, subtle **Skip** (top-trailing) that jumps straight to the app
    (still triggers permission *as needed*, just without pre-context).
@@ -37,7 +37,7 @@ per-feature tints). No emoji; SF Symbols + glyphs.
    *Point at the sky* (Sky/AR), *Fly the galaxy* (Galaxy Map), *Read your chart* (Astrology).
    Sets expectations and surfaces breadth before the user lands on one screen.
 
-3. **Location (pre-permission priming).** Explain *before* the system sheet: *"Astrolabe uses
+3. **Location (pre-permission priming).** Explain *before* the system sheet: *"Astrelia uses
    your location to place the real Sun, Moon, planets and stars in your sky. It never leaves your
    device."* Button **Enable location** → triggers the real `CoreLocation` request. A **Not now**
    secondary path that:
@@ -72,7 +72,7 @@ or the **menu** so the empty-sky dead-end is avoided.
 ## Implementation notes
 
 - New `App/Onboarding/OnboardingView.swift` presented as a `fullScreenCover` from
-  `AstrolabeApp`/`ContentView` when `!prefs.onboardingCompleted`. Keep it **out** of the
+  `AstreliaApp`/`ContentView` when `!prefs.onboardingCompleted`. Keep it **out** of the
   `TimelineView` render loop.
 - Storage: `onboarding.completedVersion: Int` in `AppPreferences` (see preferences spec).
 - Respect Reduce Motion (no auto-animating starfield drift; static is fine) per a11y spec.
