@@ -835,7 +835,10 @@ struct GalaxyMapView: View {
                         let theta = phase + pitch * Float(log(Double(rad / (physR * 0.14))))
                         let base = center + cos(theta) * rad * gx + sin(theta) * rad * gy
                         let perp = cos(theta) * gx + sin(theta) * gy, tang = -sin(theta) * gx + cos(theta) * gy
-                        let pos = base + perp * Float(gauss()) * physR * 0.04 * (0.6 + f) + nrm * Float(gauss()) * physR * 0.025 + tang * Float(rnd(-1, 1)) * physR * 0.02
+                        let radialJitter: Float = Float(gauss()) * physR * 0.04 * (0.6 + f)
+                        let verticalJitter: Float = Float(gauss()) * physR * 0.025
+                        let tangentialJitter: Float = Float(rnd(-1, 1)) * physR * 0.02
+                        let pos = base + perp * radialJitter + nrm * verticalJitter + tang * tangentialJitter
                         let r = rnd(0, 1)
                         let c = r < 0.7 ? starBW : (r < 0.9 ? SIMD4<Float>(1, 1, 1, 1) : warm)
                         gas(pos, physR * 0.018, c, (0.5 - 0.25 * Double(f)) * rnd(0.5, 1), 0.5)
