@@ -27,6 +27,12 @@ final class ObserverLocation: NSObject, CLLocationManagerDelegate {
     }
 
     func start() {
+        if let fixed = SnapshotLocation.coordinate {
+            latitude = fixed.latitude
+            longitude = fixed.longitude
+            authorization = .authorizedWhenInUse
+            return
+        }
         manager.requestWhenInUseAuthorization()
         manager.startUpdatingLocation()
     }
@@ -44,6 +50,7 @@ final class ObserverLocation: NSObject, CLLocationManagerDelegate {
     nonisolated func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {}
 
     nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        guard SnapshotLocation.coordinate == nil else { return }
         // `start()` already called startUpdatingLocation; iOS begins delivering once
         // authorised, so we only need to mirror the status here.
         let status = manager.authorizationStatus

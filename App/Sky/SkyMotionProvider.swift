@@ -76,9 +76,16 @@ final class SkyMotionProvider: NSObject, CLLocationManagerDelegate {
     func start() {
         locationManager.delegate = self
         locationManager.desiredAccuracy = kCLLocationAccuracyHundredMeters
-        locationManager.requestWhenInUseAuthorization()
-        locationManager.startUpdatingLocation()
-        authorization = locationManager.authorizationStatus
+        if let fixed = SnapshotLocation.coordinate {
+            // Screenshot run: no prompt, no updates, just the given observer.
+            latitude = fixed.latitude
+            longitude = fixed.longitude
+            authorization = .authorizedWhenInUse
+        } else {
+            locationManager.requestWhenInUseAuthorization()
+            locationManager.startUpdatingLocation()
+            authorization = locationManager.authorizationStatus
+        }
 
         if motion.isDeviceMotionAvailable {
             motion.deviceMotionUpdateInterval = 1.0 / 60.0
@@ -105,6 +112,9 @@ final class SkyMotionProvider: NSObject, CLLocationManagerDelegate {
     }
 
     nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        // A screenshot run stands in for an authorized observer; the real status
+        // (never asked for) must not overwrite it and re-raise the prompt banner.
+        guard SnapshotLocation.coordinate == nil else { return }
         let status = manager.authorizationStatus
         Task { @MainActor in self.authorization = status }
     }

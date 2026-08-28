@@ -36,8 +36,9 @@ struct AstreliaApp: App {
                 NavigationStack { SettingsView() }
             } else if ProcessInfo.processInfo.arguments.contains("-snapshotTonight") {
                 NavigationStack {
-                    TonightView(fixedLocation: GeographicLocation(latitude: .degrees(40.71),
-                                                                  longitude: .degrees(-74.0)))
+                    let fixed = SnapshotLocation.coordinate ?? (latitude: 40.71, longitude: -74.0)
+                    TonightView(fixedLocation: GeographicLocation(latitude: .degrees(fixed.latitude),
+                                                                  longitude: .degrees(fixed.longitude)))
                 }
                 .preferredColorScheme(.dark)
             } else if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-snapshotPlanet") {
