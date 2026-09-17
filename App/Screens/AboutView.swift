@@ -137,7 +137,7 @@ enum SourceCatalog {
         SourceGroup(title: "Star Catalogs", tint: Theme.gold, entries: [
             SourceEntry(name: "HYG Database",
                         detail: "~119k stars combining the Hipparcos, Yale Bright Star, and Gliese catalogs — proper names, positions, parallax distances, magnitudes, spectral types, and B−V colour. Compiled by David Nash (astronexus).",
-                        license: "Public domain",
+                        license: "CC BY-SA 4.0",
                         url: "https://github.com/astronexus/HYG-Database"),
             SourceEntry(name: "Hipparcos & Tycho Catalogues",
                         detail: "ESA's astrometric survey — the parallax distances and precise positions underlying the HYG data.",

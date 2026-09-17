@@ -11,7 +11,7 @@ settings:
     SWIFT_STRICT_CONCURRENCY: complete
     MARKETING_VERSION: "1.0"
     CURRENT_PROJECT_VERSION: "1"
-    # Signing — team "Elysia Muñoz" (a Team ID is not secret; it ships in every app).
+    # Signing: set DEVELOPMENT_TEAM to your own Team ID to build on a device.
     DEVELOPMENT_TEAM: "52K336H235"
     CODE_SIGN_STYLE: Automatic
 

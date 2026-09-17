@@ -1,4 +1,4 @@
-# tools/
+# Tools/
 
 Offline asset tooling. Not part of the app build — run by hand to produce data that
 gets bundled under `App/Resources/`.
@@ -20,7 +20,7 @@ url = next(h["href"] for h in m["collection"]["items"] if h["href"].endswith("la
 open("m42_src.jpg","wb").write(urllib.request.urlopen(url).read())
 PY
 # Bake → bundled dataset + a preview PNG to eyeball the shape:
-python3 tools/nebula_bake.py m42_src.jpg App/Resources/Nebulae/m42.nbl --preview m42_preview.png
+python3 Tools/nebula_bake.py m42_src.jpg App/Resources/Nebulae/m42.nbl --preview m42_preview.png
 ```
 
 Then map the landmark id → `.nbl` in the app (see `NebulaModel`/`appendLandmarkSprites`

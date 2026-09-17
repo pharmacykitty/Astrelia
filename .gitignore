@@ -29,3 +29,10 @@ Web/test-results/
 Web/playwright-report/
 Web/blob-report/
 Web/.cache/
+
+# Kept on the maintainer's machine, not published
+CLAUDE.md
+council-report-*.html
+council-transcript-*.md
+docs/app-icon-concepts.html
+Web/

@@ -2,163 +2,74 @@
 
 # Astrelia
 
-**A point-at-the-sky planetarium for iOS with deep astrophysical data — built to be genuinely beautiful.**
+**A planetarium for iOS. Point your phone at the sky, then leave Earth and fly through the galaxy.**
 
-Raise your phone toward the sky to see the real positions of stars, planets, and other
-celestial bodies, accurately computed for your location and the current instant. Tap anything
-for as much detail as exists. Then leave Earth entirely and fly through a 3D map of the galaxy.
-
-<sub>iOS · Swift 6 (strict concurrency) · SwiftUI + Metal · *named Astrelia, 2026-08-24*</sub>
+[Get it on the App Store](https://apps.apple.com/app/id6804829721) · free · iOS 26+
 
 </div>
 
 ---
 
-## The three pillars
+Astrelia computes where everything in the sky is for your exact location and the current second, using real ephemeris math instead of a lookup service, and draws it over the sky you're pointing at. Tap a star and it tells you what it knows. When the sky gets small, switch to the galaxy map and fly out through 109,000 real stars, past nebulae rebuilt from telescope photos, to the black hole in the middle.
 
-1. **Accurate** — real ephemeris math and real catalogs. Positions are validated against
-   published reference values (Meeus’ worked examples, JPL Horizons) and aim to match
-   Stellarium / SkySafari within reason.
-2. **Deep** — every body carries the richest dataset we can source. Tapping always rewards
-   curiosity: spectral class, temperature, luminosity, light-travel time, orbital elements,
-   exoplanets.
-3. **Beautiful** — the differentiator. Smooth motion, glowing star fields, a volumetric Milky
-   Way, tasteful typography, and considered transitions throughout.
-
-The astrology layer that grew up alongside this app now lives in its own sister app,
-**Ecliptica** (`~/Developer/Ecliptica`), sharing the same `CelestialCore` engine via the
-`AstroPackages` repo.
-
----
-
-## A look
+I built it between June and August 2026 and shipped version 1.0 in September. It's feature-complete and I don't plan to do much more with it, so the code is here for anyone who wants to read it, learn from it or build on it.
 
 <table>
   <tr>
-    <td align="center"><img src="docs/screenshots/menu.png" width="240"><br><sub><b>The hub</b> — Explore</sub></td>
-    <td align="center"><img src="docs/screenshots/tonight.png" width="240"><br><sub><b>Tonight</b> — what’s up right now</sub></td>
-    <td align="center"><img src="docs/screenshots/star.png" width="240"><br><sub><b>Star detail</b> — numbers → intuition</sub></td>
-  </tr>
-  <tr>
-    <td align="center" colspan="3"><img src="docs/screenshots/planet.png" width="240"><br><sub><b>Planet detail</b> — physical facts, relatably</sub></td>
+    <td align="center"><img src="docs/screenshots/tonight.png" width="240"><br><sub><b>Tonight</b>, what's up right now</sub></td>
+    <td align="center"><img src="docs/screenshots/star.png" width="240"><br><sub><b>Star detail</b>, numbers turned into intuition</sub></td>
+    <td align="center"><img src="docs/screenshots/planet.png" width="240"><br><sub><b>Planet detail</b></sub></td>
   </tr>
 </table>
 
----
-
 ## What it does
 
-### 🔭 Two ways to see the sky
-- **Sky mode** — stand on Earth and raise your phone; the real bodies project onto the celestial
-  dome (RA/Dec → alt/az for your location and time) via CoreMotion. Pinch to zoom, tap any star
-  to identify it.
-- **AR mode** — the same sky overlaid on the live camera (ARKit), with a manual calibration nudge
-  for sub-degree heading.
-- The full naked-eye star catalog (HYG, mag ≤ 6.5), constellation stick-figures, the Sun & Moon
-  (Moon with topocentric parallax + atmospheric refraction), an opt-in **ecliptic & planets
-  overlay** showing the live planets at their true sky positions, and a **±12 h time scrubber**.
+**Sky mode.** Hold your phone up and about 8,900 naked-eye stars, the constellation lines, the Sun, the Moon and the planets sit where they really are, projected from RA/Dec to altitude and azimuth through CoreMotion. There's an AR version over the camera feed with a one-tap alignment that gets heading error under a degree, and a slider that runs the sky twelve hours forward or back.
 
-### 🌌 Galaxy Map — fly through the galaxy in 3D
-- The real local star field: ~25k HYG stars at their true 3D positions (parallax → parsecs), Sun
-  at the origin. Orbit, pinch, or engage **free-flight** and cruise hands-free.
-- A stylized, true-scale **Milky Way** (four-arm barred spiral) with volumetric nebulae — ten of
-  them **image-baked from real visible-light photos** (Orion, Eagle, Lagoon, Crab, Veil, Ring…),
-  plus clusters, satellite galaxies and black holes.
-- **Exoplanets** from the NASA Exoplanet Archive: fly to a host star and open its planetary
-  system. Rendered entirely through a custom **Metal** sprite pipeline (camera-relative
-  coordinates + logarithmic depth) with an octree for picking and frustum culling.
-- *(There may or may not be a black hole to fall into.)*
+**Galaxy map.** About 109,000 HYG stars placed at their true 3D positions from parallax, rendered through a custom Metal sprite pipeline with camera-relative coordinates and a logarithmic depth buffer so nothing jitters at galactic distances. A point octree handles culling and tap picking. The Milky Way itself is stylized, but it's true to scale.
 
-### ✨ Tonight
-The Moon’s phase, day/night with sunrise & sunset, which naked-eye planets are up (with where to
-look and when they rise/set), active **meteor showers**, and upcoming **astronomical events**
-(solstices, oppositions, eclipses…) — all computed locally on the live ephemeris.
+**Nebulae from photographs.** 27 nebulae (Orion, the Eagle's pillars, the Horsehead, the Crab and others) aren't textures. `Tools/nebula_bake.py` turns a visible-light telescope image into roughly 60,000 particles, so face-on you see the photo and from any other angle you're flying through a volume. Only the particles ship; the photos never do.
 
-### 📖 Catalog & Constellations
-Search stars, planets and deep-sky objects with rich detail pages — including an **HR-diagram
-“you are here”** and a true-scale **Sun-vs-star** silhouette. Browse all **88 IAU constellations**
-plus asterisms, historical figures and cultural skies, each with a **“constellations are a
-line-of-sight illusion”** 3D view that pulls the flat pattern apart in real depth.
+**Sgr A\*.** The black hole at the centre gravitationally lenses the rendered galaxy behind it with a Schwarzschild geodesic march on the GPU.
 
----
+**Exoplanets.** Around 6,300 confirmed planets from the NASA Exoplanet Archive, matched to their host stars. Fly to one and open a top-down view of its system with the habitable zone drawn in.
 
-## Architecture
+**Tonight, the catalog and constellations.** Moon phase, which planets are up and when, active meteor showers and upcoming events, all computed on device. Search stars, planets and deep-sky objects; every constellation can be rotated in 3D, which is the fastest way to see that a constellation is just stars that happen to line up from here.
 
-The math and data are kept **platform-agnostic and unit-tested**, fully isolated from UI and
-sensors.
+## How it's put together
 
 ```
-App/                  SwiftUI iOS app (Swift 6, strict concurrency) + the Metal galaxy renderer
-  Sky/                sensors, AR, projection (SkyCamera / SkyMotionProvider / ARCameraController)
+App/                  the SwiftUI app and the Metal renderer
+  Sky/                sensors, AR, sky projection
   Screens/            Tonight, Catalog, Constellations, Galaxy Map, About
-  Catalog/            catalog data + “relatable” facts (StarFacts, Landmarks, Glossary…)
-project.yml           XcodeGen spec — the .xcodeproj is generated, not committed
-../AstroPackages/     sibling repo with the shared engine (checked out next to this one)
-  CelestialCore/      pure astronomy engine — NO UIKit/SwiftUI deps
-    Time/             Julian date, sidereal time, ΔT, nutation
-    Coordinates/      equatorial ⇄ horizontal, precession, refraction
-    Catalog/          HYG stars, Messier/NGC deep-sky
-    Ephemeris/        Sun & Moon (Meeus), planets Mercury–Pluto (SwiftAA), minor bodies, events
-    Astrophysics/     derived stellar radius, light-travel, unit conversions
-    Spatial/          PointOctree for the galaxy map
+  Catalog/            catalog data and the "relatable facts" layer
+  Resources/          stars.bin, exoplanets.csv, constellation lines, nebulae
+Tools/                build_star_catalog.py, nebula_bake.py
+docs/                 design notes and specs written while building it
+project.yml           XcodeGen spec
 ```
 
-- **`CelestialCore`** is pure computation: feed it a time + observer + body, get back coordinates
-  and physical data. `Sendable`, free of global mutable state, and unit-tested against known
-  references. It lives in the sibling **`AstroPackages`** repo, shared with the **Ecliptica**
-  astrology app.
-- The app layer turns engine output into the rendered dome, the galaxy, and the detail UI.
+The astronomy engine isn't in this repo. It lives in [AstroPackages](https://github.com/pharmacykitty/AstroPackages) (`CelestialCore`), shared with the sister app [Selenia](https://github.com/pharmacykitty/Selenia). It's pure Swift with no UI or sensor code, Swift 6 strict concurrency throughout, and it's tested against the worked examples in Meeus' *Astronomical Algorithms*.
 
-Deeper design notes live in [`CLAUDE.md`](CLAUDE.md) and the per-feature specs in [`docs/`](docs/).
+Some docs in `docs/` describe features that were planned but never built (widgets, onboarding, localization). They're kept as design history.
 
----
+## Building it
 
-## Build & run
-
-The Xcode project is generated by [XcodeGen](https://github.com/yonaskolb/XcodeGen) from
-`project.yml`, so it isn’t committed.
+You need Xcode 27 with the iOS 26 SDK and [XcodeGen](https://github.com/yonaskolb/XcodeGen). Check out AstroPackages next to this repo, because `project.yml` points at `../AstroPackages`:
 
 ```sh
-brew install xcodegen      # once
-xcodegen generate          # writes Astrelia.xcodeproj
+git clone https://github.com/pharmacykitty/Astrelia.git
+git clone https://github.com/pharmacykitty/AstroPackages.git
+cd Astrelia
+brew install xcodegen
+xcodegen generate
 open Astrelia.xcodeproj
 ```
 
-Run the engine’s tests:
+Set `DEVELOPMENT_TEAM` in `project.yml` (or in Xcode) to your own team to run on a device. The simulator works without one, but AR mode needs real hardware.
 
-```sh
-cd ../AstroPackages/CelestialCore && swift test
-```
+All the data is committed, so there's nothing to download. To rebuild the star catalog with a different magnitude cutoff, run `python3 Tools/build_star_catalog.py 7.5`.
 
-> **Star catalog data.** The bundled naked-eye catalog ships in `App/Resources/`. The full
-> [HYG database](https://github.com/astronexus/HYG-Database) (~120k stars, ~34 MB) is **not**
-> committed — fetch it into a git-ignored `Data/` directory only if you’re regenerating catalogs
-> (see `tools/`).
+## License
 
----
-
-## Data sources & licensing
-
-Built on open data, with attribution surfaced in-app under **About → Sources**:
-
-- **Stars** — HYG Database (Hipparcos/Yale/Gliese; public domain).
-- **Deep-sky** — Messier / NGC; landmark positions via SIMBAD/CDS.
-- **Exoplanets** — NASA Exoplanet Archive.
-- **Sun / Moon / planets** — our own Meeus implementations + **SwiftAA** (MIT) for planet
-  longitudes; physical facts from NASA/JPL fact sheets.
-- **Constellation lines** — d3-celestial (Frohn, BSD). **Nebula imagery** — ESA/Hubble & ESO
-  (CC BY 4.0), used only to derive particle datasets; the source photos are never bundled.
-
----
-
-## Status & roadmap
-
-The astronomy engine, the AR/Sky views, the Galaxy Map (Metal), and the full constellation
-browser are all working. The astrology module was split into the sister **Ecliptica** app
-(2026-07-15). Current focus is ship-readiness and the next layer of
-polish — see [`CLAUDE.md`](CLAUDE.md) for the full roadmap and [`docs/`](docs/) for design specs,
-including planned work on [preferences](docs/preferences-spec.md),
-[widgets](docs/widgets-spec.md), [onboarding](docs/onboarding-spec.md),
-[accessibility](docs/accessibility-spec.md) and [localization](docs/localization-spec.md).
-
-<div align="center"><sub>Made with care, pointed at the sky.</sub></div>
+The code is GPL-3.0 (see `LICENSE`). The bundled data keeps its own licenses: the star catalog is CC BY-SA 4.0 from the HYG database, the constellation lines are BSD-3-Clause from d3-celestial, and the nebulae are derived from ESA/Hubble, ESO and NOIRLab images (CC BY 4.0) and NASA images (public domain). Every source is credited in [`NOTICE.md`](NOTICE.md).

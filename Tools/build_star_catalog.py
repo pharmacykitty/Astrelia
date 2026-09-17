@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Regenerate App/Resources/stars.bin from the HYG database.
 
-Downloads HYG v4.1 (public domain), keeps stars with a known distance and
+Downloads HYG v4.1 (CC BY-SA 4.0, by David Nash / astronexus; the generated
+stars.bin is a derivative and stays under CC BY-SA 4.0), keeps stars with a known distance and
 magnitude <= MAG_LIMIT, and writes the packed binary catalog read by
 `BinaryStarCatalog` (see that file for the exact layout).
 
